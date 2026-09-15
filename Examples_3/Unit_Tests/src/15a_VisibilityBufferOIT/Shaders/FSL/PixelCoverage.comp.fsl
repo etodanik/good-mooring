@@ -1,0 +1,74 @@
+/*
+ * Copyright (c) 2017-2026 The Forge Interactive Inc.
+ * 
+ * This file is part of The-Forge
+ * (see https://github.com/ConfettiFX/The-Forge).
+ * 
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+*/
+
+#include "ShaderDefs.h.fsl"
+#include "VisibilityBufferResources.h.fsl"
+#include "TriangleFiltering.srt.h"
+#include "../../../../../../Common_3/Renderer/VisibilityBuffer/Shaders/FSL/VisibilityBufferShaderDefs.h.fsl"
+#include "../../../../../../Common_3/Renderer/VisibilityBuffer/Shaders/FSL/ClearBuffers.h.fsl"
+
+
+#define PIXEL_SCANNING_STEP 24
+
+ROOT_SIGNATURE(ComputeRootSignature)
+NUM_THREADS(1, 1, 1)
+void CS_MAIN( SV_DispatchThreadID(uint3) threadID )
+{
+	INIT_MAIN;
+  for ( uint i = 0; i < gPerFrameConstants.meshCount; i++)
+  {
+		StoreByte(gPixelCoverageBufferRW, i << 2, 0);
+  }
+
+	// we dont need to scan all pixels, just PIXEL_SCANNING_STEP and each frame we shift using frame counter
+	uint iStart = (gPerFrameConstants.mFrameCounter % (PIXEL_SCANNING_STEP * PIXEL_SCANNING_STEP)) / PIXEL_SCANNING_STEP;
+	uint jStart = gPerFrameConstants.mFrameCounter % PIXEL_SCANNING_STEP;
+	for ( uint j = jStart; j < gPerFrameConstants.screenHeight; j += PIXEL_SCANNING_STEP )
+	{
+		for ( uint i = iStart; i < gPerFrameConstants.screenWidth; i += PIXEL_SCANNING_STEP )	
+		{
+#if(SAMPLE_COUNT > 1)
+			float4 visRaw = LoadTex2DMS(gVBTex, gSamplerTrilinearClamp, uint2(i,j), 0);
+#else
+			float4 visRaw = LoadTex2D(gVBTex, gSamplerTrilinearClamp, uint2(i,j), 0);
+#endif
+			// Unpack float4 render target data into uint to extract data
+			uint geomSetPrimID = packUnorm4x8(visRaw);
+			if (geomSetPrimID != ~0u)
+			{
+				// Extract packed data
+				uint primitiveID = (geomSetPrimID >> PRIM_ID_LOW_BIT) & PRIM_ID_MASK;
+				uint geomSet = (geomSetPrimID >> GEOM_LOW_BIT) & GEOM_MASK;
+
+				uint triIdx0 = INDEXBUFFER_OFFSET(geomSet) + primitiveID * 3 + 0;
+				uint indirectIndex0 = LoadByte(gFilteredIndexBuffer, (triIdx0 << 2));
+				uint meshIndex = gIndirectDataBuffer[indirectIndex0];
+				meshIndex = int(meshIndex % gPerFrameConstants.meshCount);
+				uint value = LoadByte(gPixelCoverageBufferRW, meshIndex << 2);
+				StoreByte(gPixelCoverageBufferRW, meshIndex << 2, value + 1);
+			}
+		}
+	}
+    RETURN();
+}

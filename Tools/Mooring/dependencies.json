@@ -1,0 +1,25 @@
+{
+  "forge": {
+    "url": "https://codeberg.org/The-Forge/The-Forge",
+    "revision": "5abcdd969d0d883e9bf91f6926a8ea0935a0b3bc"
+  },
+  "apple_port": {
+    "url": "https://github.com/ConfettiFX/The-Forge",
+    "revision": "cd5046893faba2dc7869243873bf01f02a6f0df9"
+  },
+  "flecs": {
+    "version": "4.0.1",
+    "source": "Forge bundled source"
+  },
+  "jolt": {
+    "url": "https://github.com/jrouwe/JoltPhysics",
+    "version": "5.6.0",
+    "tag": "v5.6.0"
+  },
+  "tracy": {
+    "url": "https://github.com/wolfpld/tracy",
+    "version": "0.14.1",
+    "tag": "v0.14.1",
+    "sha256": "bf4af567e9c7524d07f3caa745fad02fb33bd5694f11910750382d1efbb251c1"
+  }
+}

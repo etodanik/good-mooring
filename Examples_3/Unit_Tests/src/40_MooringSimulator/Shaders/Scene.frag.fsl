@@ -1,0 +1,33 @@
+#include "Scene.srt.h"
+STRUCT(FragmentInput)
+{
+    DATA(float4, position, SV_Position);
+    DATA(float3, color, COLOR0);
+    DATA(float3, data, TEXCOORD0);
+    DATA(float2, plank, TEXCOORD1);
+};
+float4 PS_MAIN(FragmentInput input)
+{
+    INIT_MAIN;
+    if(input.data.z==1 && input.data.x<gCamera.modeLevel.y-.04) discard;
+    if(input.data.z==2)
+    {
+        RETURN(float4(input.position.z,0,0,1));
+    }
+    // The sign classifies above-water geometry before any screen filtering.
+    // Magnitude remains view depth; zero still means the background.
+    float depth=input.data.x>gCamera.modeLevel.y+.1?-input.data.y:input.data.y;
+    float3 color=input.color;
+    if(input.plank.y>0)
+    {
+        // Integrate a periodic joint over the pixel, retaining average colour
+        // when individual planks become smaller than a pixel.
+        float width=max(fwidth(input.plank.x),.0001), joint=.018/.48;
+        float2 edge=input.plank.x+float2(-.5,.5)*width+joint*.5;
+        float2 area=floor(edge)*joint+min(frac(edge),joint);
+        color*=1-.6*(area.y-area.x)/width;
+    }
+    // Reflections keep linear depth too: a displaced water pixel must trace
+    // its reflected ray, rather than slide this image over a flat plane.
+    RETURN(float4(color,input.data.z==1?input.data.y:depth));
+}

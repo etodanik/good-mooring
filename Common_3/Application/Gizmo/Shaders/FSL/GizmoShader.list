@@ -1,0 +1,31 @@
+#include "../../../../Graphics/FSL/defaults.h"
+
+#vert FT_VDP gizmo.vert
+#define DEFAULT
+#include "Gizmo.vert.fsl"
+#end
+
+#vert FT_VDP gizmoFace.vert
+#define FRONT_FACE
+#include "Gizmo.vert.fsl"
+#end
+
+#vert FT_VDP gizmoLocalInstance.vert
+#define GIZMO_LOCAL_INSTANCE
+#include "Gizmo.vert.fsl"
+#end
+
+#vert FT_VDP gizmoGrid.vert
+#define GRID
+#include "Gizmo.vert.fsl"
+#end
+
+#frag gizmo.frag
+#include "Gizmo.frag.fsl"
+#end
+
+#frag gizmoGrid.frag
+#define GRID
+#include "Gizmo.frag.fsl"
+#end
+

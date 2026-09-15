@@ -1,0 +1,11 @@
+#include "../../../../Graphics/FSL/defaults.h"
+
+
+#comp copy.comp
+#include "Copy.comp.fsl"
+#end
+
+#comp copy_array.comp
+#define COPY_MULTI_VIEW
+#include "Copy.comp.fsl"
+#end

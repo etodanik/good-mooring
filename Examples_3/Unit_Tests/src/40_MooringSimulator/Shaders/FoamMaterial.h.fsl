@@ -1,0 +1,48 @@
+#ifndef MOORING_FOAM_MATERIAL
+#define MOORING_FOAM_MATERIAL
+// Shared material coordinates keep adjacent sheets continuous. Particle UVs
+// shape a parcel's boundary; they must not rotate or stretch its bubble field.
+float2 foamStructure(float2 coordinate)
+{
+    float a=SampleGradTex2D(gFoamTexture,gSamplerTrilinearMirror,coordinate,ddx(coordinate),ddy(coordinate)).r;
+    float2 second=coordinate*float2(-2.73,2.73)+.37;
+    float b=SampleGradTex2D(gFoamTexture,gSamplerTrilinearMirror,second,ddx(second),ddy(second)).r;
+    return float2(a*.85+b*.15,b);
+}
+float4 foamPattern(float2 coordinate,float2 velocity,float2 slope)
+{
+    float2 material=coordinate-gWater.current.xz*gWater.screen.z;
+    float2 drift=material*gWater.detail.w;
+    float2 warp=float2(waterNoise(drift*.22),waterNoise(drift*.22+19.1))-.5;
+    float2 uv=(drift+warp*.8)*.18;
+    // Reset each advection phase only at zero weight. Surface foam and raised
+    // parcels share this flow, so their texture cannot slide through each other.
+    float phase=frac(gWater.screen.z/4+waterNoise(drift*.11)*.4);
+    float2 flow=(velocity-gWater.current.xz)*gWater.detail.w*.18*4;
+    flow*=min(1.0,.66/max(.001,length(flow)));
+    float2 a=uv-flow*(phase-.5), b=uv-flow*(frac(phase+.5)-.5);
+    float blend=abs(phase*2-1);
+    float2 structure=lerp(foamStructure(a),foamStructure(b),blend);
+    float patch=lerp(waterNoise(a*.8-slope*.45),waterNoise(b*.8-slope*.45),blend);
+    float2 grainUV=material*12+warp*2;
+    float footprint=max(length(ddx(grainUV)),length(ddy(grainUV)));
+    float grain=lerp(waterNoise(grainUV),.5,smoothstep(.35,1.0,footprint));
+    // Fresh foam keeps clustered relief after its finest bubbles disappear
+    // below a pixel. Each scale converges to its mean independently.
+    float clusters=lerp(waterNoise(grainUV*.27),.5,smoothstep(.35,1.0,footprint*.27));
+    grain=clusters*.65+grain*.35;
+    return float4(structure,patch,grain);
+}
+float foamChurn(float density,float4 pattern)
+{
+    // Fresh mass fills connected foam structures while their pores retain
+    // water transmission. The same thickness serves the surface and crowns.
+    float thickness=.25+4*pattern.x+1.2*pattern.w*pattern.w;
+    return (1-exp(-density*thickness))*(.65+.35*pattern.w);
+}
+float3 shadeFoam(float3 normal,float fresh,float detail,float shadow)
+{
+    float light=.32+.28*normal.y+.6*saturate(dot(normal,gWater.sun.xyz))*(.35+.65*shadow);
+    return lerp(float3(.65,.79,.76),float3(.88,.94,.89),fresh)*light*(.72+.28*detail);
+}
+#endif

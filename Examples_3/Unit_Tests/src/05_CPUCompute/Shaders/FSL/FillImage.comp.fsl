@@ -1,0 +1,87 @@
+/*
+ * Copyright (c) 2017-2026 The Forge Interactive Inc.
+ *
+ * This file is part of The-Forge
+ * (see https://github.com/ConfettiFX/The-Forge).
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+#include "Resources.h.fsl"
+
+#include "Basic.srt.h"
+
+ROOT_SIGNATURE(ComputeRootSignature)
+NUM_THREADS(16, 16, 1)
+void CS_MAIN(SV_GroupThreadID(uint3) inGroupThreadId, SV_DispatchThreadID(uint3) inDispatchThreadId)
+{
+    INIT_MAIN;
+
+#ifdef ISPC
+    // When in ISPC, we can print.
+    // (You also need to change to /SUBSYSTEM:CONSOLE because ISPC prints to stdout)
+    // print("inGroupThreadId: % % %\n", inGroupThreadId.x, inGroupThreadId.y, inGroupThreadId.z);
+    // print("inDispatchThreadId: % % %\n", inDispatchThreadId.x, inDispatchThreadId.y, inDispatchThreadId.z);
+#endif // ISPC
+
+    int2 pixel = int2(inDispatchThreadId.xy);
+    int2 dim = GetDimensions(gImage, 0);
+    if (inDispatchThreadId.x >= dim.x || inDispatchThreadId.y >= dim.y)
+        RETURN();
+
+    float4 outColor = float4(1, 0, 0, 1);
+    float2 uv = float2(pixel) / gFillImageData.ImageSize;
+    float  t = gFillImageData.Time;
+
+    if (gFillImageData.FillPattern == FILL_PATTERN_GRADIENT)
+    {
+        outColor = float4(uv.x, uv.y, 0, 1);
+    }
+    else if (gFillImageData.FillPattern == FILL_PATTERN_MOVING_CHECKERBOARD)
+    {
+        float  squareSize = 32.0;
+        float  speed = 64.0;
+        float2 offset = float2(t * speed, t * speed);
+        int2   cell = int2(floor((float2(pixel) + offset) / squareSize));
+        bool   even = ((cell.x + cell.y) % 2) == 0;
+        outColor = even ? float4(1, 1, 1, 1) : float4(0, 0, 0, 1);
+    }
+    else if (gFillImageData.FillPattern == FILL_PATTERN_CIRCULAR_RIPPLE)
+    {
+        float2 center = gFillImageData.ImageSize * 0.5;
+        float2 d = float2(pixel) - center;
+        float  dist = f2Length(d);
+        float  freq = 0.1;
+        float  speed = 3.0;
+        float  wave = sin(dist * freq - t * speed);
+        float  intensity = wave * 0.5 + 0.5;
+        outColor = float4(intensity, intensity, 1 - intensity, 1);
+    }
+    else if (gFillImageData.FillPattern == FILL_PATTERN_STRIPES)
+    {
+        float stripes = 10.0;
+        float speed = 2.0;
+        float x = uv.x * stripes * 2 * 3.14159 + t * speed;
+        float s = sin(x) * 0.5 + 0.5;
+        outColor = float4(s, 1 - s, 0.5, 1);
+    }
+
+    Write2D(gImage, pixel, outColor);
+
+    RETURN();
+}

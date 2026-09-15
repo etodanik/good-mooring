@@ -1,0 +1,3 @@
+#ispc x86:sse4  MathLibrary
+#include "MathLibrary.fsl"
+#end

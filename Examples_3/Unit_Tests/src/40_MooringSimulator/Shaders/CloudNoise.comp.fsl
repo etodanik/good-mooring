@@ -1,0 +1,46 @@
+#include "Water.srt.h"
+// Periodic noise is baked once into a 64^3 texture. Cloud marching then uses
+// hardware trilinear samples instead of evaluating nested noise per ray step.
+float3 cloudHash(uint3 p)
+{
+    p=1664525u*p+1013904223u;
+    p.x+=p.y*p.z; p.y+=p.z*p.x; p.z+=p.x*p.y;
+    p^=p>>16u;
+    return float3(p&0x00ffffffu)/16777216.0;
+}
+float worley(float3 p,uint period)
+{
+    int3 cell=int3(floor(p)); float3 f=frac(p); float distance=2;
+    for(int z=-1;z<=1;z++) for(int y=-1;y<=1;y++) for(int x=-1;x<=1;x++)
+    {
+        int3 offset=int3(x,y,z);
+        float3 delta=float3(offset)+ cloudHash(uint3(cell+offset)&(period-1))-f;
+        distance=min(distance,dot(delta,delta));
+    }
+    return saturate(sqrt(distance));
+}
+float perlin(float3 p,uint period)
+{
+    int3 cell=int3(floor(p)); float3 f=frac(p), blend=f*f*f*(f*(f*6-15)+10); float value=0;
+    for(uint z=0;z<2;z++) for(uint y=0;y<2;y++) for(uint x=0;x<2;x++)
+    {
+        uint3 offset=uint3(x,y,z);
+        float3 gradient=normalize(cloudHash((uint3(cell)+offset)&(period-1))*2-1);
+        float3 weight=lerp(1-blend,blend,float3(offset));
+        value+=dot(gradient,f-float3(offset))*weight.x*weight.y*weight.z;
+    }
+    return .5+value*.7;
+}
+NUM_THREADS(4,4,4)
+void CS_MAIN(SV_DispatchThreadID(uint3) id)
+{
+    INIT_MAIN;
+    float3 uv=(float3(id)+.5)/64;
+    // Large density lobes establish the silhouette. Smaller cells only erode
+    // its boundary; baking them into base density made the whole cloud wispy.
+    float billows=1-worley(uv*4,4);
+    float erosion=worley(uv*8,8)*.65+worley(uv*16,16)*.35;
+    float base=lerp(perlin(uv*2,2),billows,.6);
+    Write3D(gCloudNoiseOutput,id,float4(base,erosion,0,1));
+    RETURN();
+}

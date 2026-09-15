@@ -1,0 +1,65 @@
+/*
+ * Copyright (c) 2017-2026 The Forge Interactive Inc.
+ *
+ * This file is part of The-Forge
+ * (see https://github.com/ConfettiFX/The-Forge).
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+#include "ShaderDefs.h.fsl"
+#include "VisibilityBufferResources.h.fsl"
+#include "VisibilityBuffer.srt.h"
+#include "VisibilityBufferResourcesUtil.h.fsl"
+
+ROOT_SIGNATURE(DefaultRootSignature)
+PsInAlphaTested VS_MAIN(SV_VertexID(uint) vertexID)
+{
+    INIT_MAIN;
+    PsInAlphaTested Out;
+    uint vertexIndex = vertexID;
+#ifdef PRIMID_FALLBACK
+
+   
+#if defined( VULKAN ) || defined (METAL)
+        uint geomOffset = INDEXBUFFER_OFFSET(GEOMSET_ALPHA_CUTOUT);
+        uint triOffset = 0;
+#else
+        uint geomOffset = 0;
+        uint triOffset = INDEXBUFFER_OFFSET(GEOMSET_ALPHA_CUTOUT);
+#endif
+
+    Out.primitiveId = (vertexID - geomOffset ) / 3;
+    uint triIdx0 = vertexID + triOffset;
+    vertexIndex = LoadByte(gFilteredIndexBuffer, triIdx0 << 2);
+
+#endif
+
+    float4          vertexPos = LoadVertex(vertexIndex);
+
+	#if FT_MULTIVIEW
+		Out.position = mul(gObjectUniformBlockPerDraw.mWorldViewProjMat.mat[VR_VIEW_ID], vertexPos);
+	#else
+		Out.position = mul(gObjectUniformBlockPerDraw.mWorldViewProjMat.mat, vertexPos);
+	#endif
+    Out.texCoord = LoadTexCoord(vertexIndex);
+    // IndirectDataBuffer stores mesh index, which in this case is the same as material ID
+    Out.meshIdx = gIndirectDataBuffer[vertexIndex];
+
+    RETURN(Out);
+}

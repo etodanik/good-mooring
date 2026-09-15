@@ -1,0 +1,643 @@
+--- a/Common_3/Application/Fonts/FontSystem.cpp
++++ b/Common_3/Application/Fonts/FontSystem.cpp
+@@ -1074,7 +1074,10 @@
+ float fntGetRatio(TFFont* pFont, float fontSize)
+ {
+ #ifdef ENABLE_FORGE_FONTS
+-    return fontSize / pFont->mGlyphResolution * pFont->mScaleMultiplier;
++    // Undo the encoder's distance normalization, then convert font units to
++    // physical pixels. Glyph atlas resolution does not determine edge width.
++    return stbtt_ScaleForPixelHeight(&pFont->mSTB, fontSize) *
++           TF_MSDF_FONT_UNITS_PER_DISTANCE_UNIT * pFont->mFontInfo.mPxRange * pFont->mScaleMultiplier;
+ #else
+     UNREF_PARAM(pFont);
+     UNREF_PARAM(fontSize);
+@@ -1176,4 +1179,4 @@
+     UNREF_PARAM(pMatProjView);
+     UNREF_PARAM(pDrawDesc);
+ #endif
+-}
+\ No newline at end of file
++}
+--- a/Common_3/Application/Interfaces/IFont.h
++++ b/Common_3/Application/Interfaces/IFont.h
+@@ -61,6 +61,9 @@
+     uint32_t mMSDFGlyphStride;
+     uint32_t mMSDFGlyphCount;
+ } TFMSDFFontInfo;
++
++// The MSDF converter measures signed distance in font units divided by 64.
++#define TF_MSDF_FONT_UNITS_PER_DISTANCE_UNIT 64.0f
+ 
+ typedef struct TFFontSystemDesc
+ {
+@@ -164,4 +167,4 @@
+ 
+ FORGE_API void cmdDrawWorldSpaceText(TFCmd* pCmd, const mat4* pMatWorld, const TFCameraMatrix* pMatProjView,
+                                      const TFFontDrawDesc* pDrawDesc);
+-#endif
+\ No newline at end of file
++#endif
+--- a/Common_3/Application/Profiler/ProfilerBase.cpp
++++ b/Common_3/Application/Profiler/ProfilerBase.cpp
+@@ -1027,7 +1027,9 @@
+             varDesc.pLabel = timerInfo.pName;
+             varDesc.mWidgetType = TF_WIDGET_TYPE_CHECKBOX;
+             varDesc.pBool = &gPlotModeData[i].mEnabled;
++#ifdef ENABLE_FORGE_SCRIPTING
+             luaRegisterWidgetVariable(&varDesc);
++#endif
+         }
+     }
+ #else
+@@ -1484,7 +1486,9 @@
+                             varDesc.pLabel = "TimerColumnText";
+                             varDesc.mWidgetType = TF_WIDGET_TYPE_DYNAMIC_TEXT;
+                             varDesc.pText = &pColumnData->mText;
+-                            luaRegisterWidgetVariable(&varDesc);
++                #ifdef ENABLE_FORGE_SCRIPTING
++            luaRegisterWidgetVariable(&varDesc);
++#endif
+                         }
+                     }
+                 }
+@@ -2164,7 +2168,9 @@
+     mMenuWindowDesc.mFlags =
+         TF_UI_WINDOW_TITLE | TF_UI_WINDOW_SCALABLE | TF_UI_WINDOW_MINIMIZABLE | TF_UI_WINDOW_MOVABLE | TF_UI_WINDOW_BORDER;
+ 
++#ifdef ENABLE_FORGE_SCRIPTING
+     registerLuaWidgets();
++#endif
+ #else
+     (void)widthUI;
+     (void)heightUI;
+@@ -2674,6 +2680,15 @@
+ 
+ uint64_t cpuProfileEnter(ProfileToken nToken_)
+ {
++#ifdef TRACY_ENABLE
++    const auto index = ProfileGetTimerIndex(nToken_);
++    if (index < g_Profile.nTotalTimers) {
++        const auto& timer = g_Profile.TimerInfo[index];
++        mooringTracyCpuEnter(timer.pName, g_Profile.GroupInfo[timer.nGroupIndex].pName, timer.nColor);
++    } else {
++        mooringTracyCpuEnter("Invalid Forge timer", "Forge", 0xEE5544);
++    }
++#endif
+     Profile& S = g_Profile;
+     uint64_t nGroupMask = ProfileGetGroupMask(nToken_);
+     if (nGroupMask & S.nActiveGroup)
+@@ -2872,6 +2887,7 @@
+ 
+ void cpuProfileLeave(ProfileToken nToken_, uint64_t nTickStart)
+ {
++    mooringTracyCpuLeave();
+     if (PROFILE_INVALID_TICK != nTickStart)
+     {
+         if (ProfileThreadLog* pLog = ProfileGetOrCreateThreadLog())
+@@ -5239,7 +5255,9 @@
+     luaVarDesc.mWidgetType = TF_WIDGET_TYPE_CHECKBOX;
+     luaVarDesc.pLabel = "Toggle Profiler";
+     luaVarDesc.pBool = &gProfilerWidgetUIEnabled;
++#ifdef ENABLE_FORGE_SCRIPTING
+     luaRegisterWidgetVariable(&luaVarDesc);
++#endif
+ 
+     luaFuncDesc.mType = TF_LUA_WIDGET_FUNCTION_ON_EDITED;
+     luaFuncDesc.pLabel = "Dump Profile";
+--- a/Common_3/Application/Screenshot/Screenshot.cpp
++++ b/Common_3/Application/Screenshot/Screenshot.cpp
+@@ -313,6 +313,7 @@
+ 
+ void captureScreenshot(TFScreenshotDesc* pDesc)
+ {
++    MTRACY_ZONE("captureScreenshot");
+ #ifdef ENABLE_SCREENSHOT
+     ASSERT(pScreenshotCapturer);
+ 
+--- a/Common_3/Graphics/Interfaces/IGraphics.h
++++ b/Common_3/Graphics/Interfaces/IGraphics.h
+@@ -1529,6 +1529,9 @@
+ #if defined(METAL)
+     struct
+     {
++#ifdef TRACY_ENABLE
++        void* pTracy;
++#endif
+         id<MTLCommandBuffer>         pCommandBuffer;
+         id<MTLRenderCommandEncoder>  pRenderEncoder;
+         id<MTLComputeCommandEncoder> pComputeEncoder;
+@@ -1704,6 +1707,9 @@
+ #if defined(METAL)
+     struct
+     {
++#ifdef TRACY_ENABLE
++        void* pTracy;
++#endif
+         id<MTLCommandQueue> pCommandQueue;
+         id<MTLFence>        pQueueFence;
+         uint32_t            mBarrierFlags;
+--- a/Common_3/OS/ThirdParty/OpenSource/hidapi/mac/hid.c
++++ b/Common_3/OS/ThirdParty/OpenSource/hidapi/mac/hid.c
+@@ -30,8 +30,8 @@
+ 
+ #include "../hidapi.h"
+ 
+-#include "../../../../../../../../Utilities/Interfaces/IThread.h"
+-#include "../../../../../../../../Utilities/Interfaces/IMemory.h"
++#include "../../../../../Utilities/Interfaces/IThread.h"
++#include "../../../../../Utilities/Interfaces/IMemory.h"
+ 
+ /* As defined in AppKit.h, but we don't need the entire AppKit for a single constant. */
+ extern const double NSAppKitVersionNumber;
+--- a/Common_3/Resources/ResourceLoader/ResourceLoader.cpp
++++ b/Common_3/Resources/ResourceLoader/ResourceLoader.cpp
+@@ -2267,7 +2267,9 @@
+     uint32_t rowBytes = 0;
+     uint32_t numRows = 0;
+ 
+-    bool ret = util_get_surface_info(texture->mWidth, texture->mHeight, fmt, &numBytes, &rowBytes, &numRows);
++    const uint32_t width = max(1u, texture->mWidth >> pTextureCopy.mTextureMipLevel);
++    const uint32_t height = max(1u, texture->mHeight >> pTextureCopy.mTextureMipLevel);
++    bool ret = util_get_surface_info(width, height, fmt, &numBytes, &rowBytes, &numRows);
+     if (!ret)
+     {
+         return UPLOAD_FUNCTION_RESULT_INVALID_REQUEST;
+@@ -2277,8 +2279,8 @@
+     subresourceDesc.mArrayLayer = pTextureCopy.mTextureArrayLayer;
+     subresourceDesc.mMipLevel = pTextureCopy.mTextureMipLevel;
+     subresourceDesc.mSrcOffset = pTextureCopy.mBufferOffset;
+-    subresourceDesc.mWidth = texture->mWidth;
+-    subresourceDesc.mHeight = texture->mHeight;
++    subresourceDesc.mWidth = width;
++    subresourceDesc.mHeight = height;
+ #if defined(METAL) || defined(VULKAN)
+     const uint32_t sliceAlignment = util_get_texture_subresource_alignment(pRenderer, fmt);
+     const uint32_t rowAlignment = util_get_texture_row_alignment(pRenderer);
+@@ -2315,6 +2317,7 @@
+ 
+ static void streamerThreadFunc(void* pThreadData)
+ {
++    MTRACY_ZONE("streamerThreadFunc");
+     ResourceLoader* pLoader = (ResourceLoader*)pThreadData;
+     ASSERT(pLoader);
+ 
+@@ -2756,6 +2759,7 @@
+ 
+ static void waitForToken(ResourceLoader* pLoader, const TFSyncToken* token)
+ {
++    MTRACY_ZONE("waitForToken"); MTRACY_VALUE(*token);
+     if (pLoader->mDesc.mSingleThreaded)
+     {
+         return;
+@@ -3648,11 +3652,14 @@
+     queueGeometryLoad(pResourceLoader, &updateDesc, token);
+ }
+ 
+-void addResource(TFBufferLoadDesc* pBufferDesc, TFSyncToken* token) { addResource_Buffer(pBufferDesc, token); }
+-
+-void addResource(TFTextureLoadDesc* pTextureDesc, TFSyncToken* token) { addResource_Texture(pTextureDesc, token); }
+-
+-void addResource(TFGeometryLoadDesc* pDesc, TFSyncToken* token) { addResource_Geometry(pDesc, token); }
++void addResource(TFBufferLoadDesc* pBufferDesc, TFSyncToken* token) {
++    MTRACY_ZONE("addResource"); addResource_Buffer(pBufferDesc, token); }
++
++void addResource(TFTextureLoadDesc* pTextureDesc, TFSyncToken* token) {
++    MTRACY_ZONE("addResource"); addResource_Texture(pTextureDesc, token); }
++
++void addResource(TFGeometryLoadDesc* pDesc, TFSyncToken* token) {
++    MTRACY_ZONE("addResource"); addResource_Geometry(pDesc, token); }
+ 
+ void removeResource_Buffer(TFBuffer* pBuffer)
+ {
+@@ -4148,6 +4155,7 @@
+ 
+ void beginUpdateResource(TFBufferUpdateDesc* pBufferUpdate)
+ {
++    MTRACY_ZONE("beginUpdateResource");
+     TFBuffer*   pBuffer = pBufferUpdate->pBuffer;
+     TFRenderer* pRenderer = pResourceLoader->ppRenderers[pBuffer->mNodeIndex];
+     ASSERT(pBuffer);
+@@ -4205,6 +4213,7 @@
+ 
+ void endUpdateResource(TFBufferUpdateDesc* pBufferUpdate)
+ {
++    MTRACY_ZONE("endUpdateResource");
+     TFBuffer* pBuffer = pBufferUpdate->pBuffer;
+     ASSERT(pBuffer);
+ 
+@@ -4267,6 +4276,7 @@
+ 
+ void beginUpdateResource(TFTextureUpdateDesc* pTextureUpdate)
+ {
++    MTRACY_ZONE("beginUpdateResource");
+     const TFTexture*      texture = pTextureUpdate->pTexture;
+     const TinyImageFormat fmt = (TinyImageFormat)texture->mFormat;
+     TFRenderer*           pRenderer = pResourceLoader->ppRenderers[texture->mNodeIndex];
+@@ -4312,6 +4322,7 @@
+ 
+ void endUpdateResource(TFTextureUpdateDesc* pTextureUpdate)
+ {
++    MTRACY_ZONE("endUpdateResource");
+     TextureUpdateDescInternal desc = {};
+     desc.pTexture = pTextureUpdate->pTexture;
+     desc.mRange = pTextureUpdate->mInternal.mMappedRange;
+@@ -4335,10 +4346,12 @@
+ void endUpdateResource_Buffer(TFBufferUpdateDesc* pBuffer) { endUpdateResource(pBuffer); }
+ void endUpdateResource_Texture(TFTextureUpdateDesc* pTexture) { endUpdateResource(pTexture); }
+ 
+-void copyResource(TFTextureCopyDesc* pTextureDesc, TFSyncToken* token) { queueTextureCopy(pResourceLoader, pTextureDesc, token); }
++void copyResource(TFTextureCopyDesc* pTextureDesc, TFSyncToken* token) {
++    MTRACY_ZONE("copyResource"); queueTextureCopy(pResourceLoader, pTextureDesc, token); }
+ 
+ void flushResourceUpdates(FlushResourceUpdateDesc* pDesc)
+ {
++    MTRACY_ZONE("flushResourceUpdates");
+     TFMutexLock lock(pResourceLoader->mUploadEngineMutex);
+ 
+     static FlushResourceUpdateDesc dummyDesc = {};
+@@ -4367,7 +4380,8 @@
+ 
+ bool isTokenCompleted(const TFSyncToken* token) { return *token <= tfrg_atomic64_load_acquire(&pResourceLoader->mTokenCompleted); }
+ 
+-void waitForToken(const TFSyncToken* token) { waitForToken(pResourceLoader, token); }
++void waitForToken(const TFSyncToken* token) {
++    MTRACY_ZONE("waitForToken"); MTRACY_VALUE(*token); waitForToken(pResourceLoader, token); }
+ 
+ TFSyncToken getLastTokenSubmitted() { return tfrg_atomic64_load_acquire(&pResourceLoader->mTokenSubmitted); }
+ 
+@@ -4383,6 +4397,7 @@
+ 
+ void waitForAllResourceLoads()
+ {
++    MTRACY_ZONE("waitForAllResourceLoads");
+     TFSyncToken token = tfrg_atomic64_load_relaxed(&pResourceLoader->mTokenCounter);
+     waitForToken(pResourceLoader, &token);
+ }
+@@ -4578,6 +4593,8 @@
+ 
+ void addShader(TFRenderer* pRenderer, const TFShaderLoadDesc* pDesc, TFShader** ppShader)
+ {
++    MTRACY_ZONE("addShader");
++    MTRACY_TEXT(pDesc->mComp.pFileName); MTRACY_TEXT(pDesc->mVert.pFileName); MTRACY_TEXT(pDesc->mFrag.pFileName);
+     TFBinaryShaderDesc binaryDesc = {};
+ 
+     ShaderByteCodeBuffer shaderByteCodeBuffer = {};
+--- a/Common_3/Tools/AssetPipeline/src/AssetPipeline_Fonts.cpp
++++ b/Common_3/Tools/AssetPipeline/src/AssetPipeline_Fonts.cpp
+@@ -988,7 +988,7 @@
+     // process pVerts into series of contour-specific edge lists
+     float2   initial = { 0, 0 }; // fix this?
+     Contour* pContourData = (Contour*)tf_malloc(sizeof(Contour) * contourCount);
+-    float    cscale = 64.0;
++    float    cscale = TF_MSDF_FONT_UNITS_PER_DISTANCE_UNIT;
+     for (int32_t i = 0; i < contourCount; i++)
+     {
+         int32_t count = pContours[i].mEnd - pContours[i].mStart;
+--- a/Common_3/Tools/ForgeShadingLanguage/fsl.py
++++ b/Common_3/Tools/ForgeShadingLanguage/fsl.py
+@@ -199,9 +199,9 @@
+             bin_dir = os.path.join(args.binaryDestination, platform.name)
+             os.makedirs(bin_dir, exist_ok=True)
+ 
+-            for binary in binary_declarations:
+-                job = (args, regen, binary, platform, dst_dir, bin_dir)
+-                jobs[binary.stage] += [job]
++        for binary in binary_declarations:
++            job = (args, regen, binary, platform, dst_dir, bin_dir)
++            jobs[binary.stage] += [job]
+     exit_code = 0
+ 
+     if args.mp:
+--- a/Common_3/Tools/ForgeShadingLanguage/generators/__init__.py
++++ b/Common_3/Tools/ForgeShadingLanguage/generators/__init__.py
+@@ -22,8 +22,8 @@
+ 
+ try:
+     from .vulkan import *
+-    from .metal import *
+ except ImportError:
+ 	pass
+ from .d3d import *
+-from .ispc import *
+\ No newline at end of file
++from .ispc import *
++from .metal import *
+--- a/Common_3/Tools/ForgeShadingLanguage/utils.py
++++ b/Common_3/Tools/ForgeShadingLanguage/utils.py
+@@ -1154,4 +1154,9 @@
+ 
+ def clang_format_file(path):
+     clang_format_path = get_clang_format_path()
++    if not os.access(clang_format_path, os.X_OK):
++        from shutil import which
++        clang_format_path = which('clang-format')
++        if not clang_format_path:
++            return # Formatting does not change the generated program.
+     subprocess.run([clang_format_path, "-i", path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+--- a/Common_3/Utilities/FileSystem/FileSystem.c
++++ b/Common_3/Utilities/FileSystem/FileSystem.c
+@@ -454,6 +454,7 @@
+ /// to read from or modify the file. May return NULL if the file could not be opened.
+ bool fsOpenStreamFromPath(TFResourceDirectory resourceDir, const char* fileName, TFFileMode mode, TFFileStream* pOut)
+ {
++    MTRACY_ZONE("fsOpenStreamFromPath");
+     TFIFileSystem* io = gResourceDirectories[resourceDir].pIO;
+     return io->Open(io, resourceDir, fileName, mode, pOut);
+ }
+--- a/Common_3/Utilities/FileSystem/UnixFileSystem.c
++++ b/Common_3/Utilities/FileSystem/UnixFileSystem.c
+@@ -75,6 +75,8 @@
+ 
+ static bool ioUnixFsOpen(TFIFileSystem* io, const TFResourceDirectory rd, const char* fileName, TFFileMode mode, TFFileStream* fs)
+ {
++    MTRACY_ZONE("File / Open");
++    MTRACY_TEXT(fileName); MTRACY_VALUE(mode);
+     __FS_NO_ERR;
+     memset(fs, 0, sizeof *fs);
+ 
+@@ -154,6 +156,7 @@
+ 
+ static bool ioUnixFsMemoryMap(TFFileStream* fs, size_t* outSize, void const** outData)
+ {
++    MTRACY_ZONE("File / MemoryMap");
+     __FS_NO_ERR;
+     *outSize = 0;
+     *outData = NULL;
+@@ -195,6 +198,7 @@
+ 
+ static bool ioUnixFsClose(TFFileStream* fs)
+ {
++    MTRACY_ZONE("File / Close");
+     __FS_NO_ERR;
+     USD(stream, fs);
+ 
+@@ -221,6 +225,8 @@
+ 
+ static size_t ioUnixFsRead(TFFileStream* fs, void* dst, size_t size)
+ {
++    MTRACY_ZONE("File / Read");
++    MTRACY_VALUE(size);
+     __FS_NO_ERR;
+     USD(stream, fs);
+     ssize_t res = read(stream->descriptor, dst, size);
+@@ -246,6 +252,8 @@
+ 
+ static size_t ioUnixFsWrite(TFFileStream* fs, const void* src, size_t size)
+ {
++    MTRACY_ZONE("File / Write");
++    MTRACY_VALUE(size);
+     __FS_NO_ERR;
+     USD(stream, fs);
+     ssize_t res = write(stream->descriptor, src, size);
+@@ -258,6 +266,8 @@
+ 
+ static bool ioUnixFsSeek(TFFileStream* fs, TFSeekBaseOffset baseOffset, ssize_t offset)
+ {
++    MTRACY_ZONE("File / Seek");
++    MTRACY_VALUE(offset);
+     __FS_NO_ERR;
+     USD(stream, fs);
+ 
+@@ -285,6 +295,7 @@
+ 
+ static bool ioUnixFsFlush(TFFileStream* fs)
+ {
++    MTRACY_ZONE("File / Flush");
+     __FS_NO_ERR;
+     if (!(fs->mMode & TF_FM_WRITE))
+         return true;
+--- a/Common_3/Utilities/Interfaces/IThread.h
++++ b/Common_3/Utilities/Interfaces/IThread.h
+@@ -113,11 +113,18 @@
+     pthread_mutex_t pHandle;
+     uint32_t        mSpinCount;
+ #endif
++#ifdef TRACY_ENABLE
++        TracyCLockCtx pTracyLock;
++#endif
+     } TFMutex;
+ 
+ #define MUTEX_DEFAULT_SPIN_COUNT 1500
+ 
+     FORGE_API bool initMutex(TFMutex* pMutex);
++#ifdef TRACY_ENABLE
++    bool initMutexTracy(TFMutex* pMutex, const char* name);
++#define initMutex(mutex) initMutexTracy(mutex, #mutex)
++#endif
+     FORGE_API void exitMutex(TFMutex* pMutex);
+ 
+     FORGE_API void acquireMutex(TFMutex* pMutex);
+--- a/Common_3/Utilities/Log/Log.c
++++ b/Common_3/Utilities/Log/Log.c
+@@ -259,6 +259,7 @@
+     offset = (offset > LOG_MAX_BUFFER) ? LOG_MAX_BUFFER : offset;
+     gLogBuffer[offset] = '\n';
+     gLogBuffer[offset + 1] = 0;
++    mooringTracyLog(level, gLogBuffer + preable_end + LOG_LEVEL_SIZE, offset - preable_end - LOG_LEVEL_SIZE);
+ 
+     // Log for each flag
+     for (uint32_t i = 0; i < log_level_count; ++i)
+@@ -296,6 +297,7 @@
+     va_start(args, message);
+     vsnprintf(gLogBuffer, LOG_MAX_BUFFER, message, args);
+     va_end(args);
++    mooringTracyLog(level, gLogBuffer, strlen(gLogBuffer));
+ 
+     if (gConsoleLogging)
+     {
+--- a/Common_3/Utilities/MemoryTracking/MemoryTracking.c
++++ b/Common_3/Utilities/MemoryTracking/MemoryTracking.c
+@@ -112,6 +112,15 @@
+ #else // defined(ENABLE_MEMORY_TRACKING)
+ 
+ #include "stdbool.h"
++#ifdef TRACY_ENABLE
++#include <pthread.h>
++// Release allocator has no tracker lock. Keep realloc + events atomic too.
++static pthread_mutex_t tracyAllocationMutex = PTHREAD_MUTEX_INITIALIZER;
++static void tracyAllocationUnlock(int* guard) { (void)guard; pthread_mutex_unlock(&tracyAllocationMutex); }
++#define TRACY_ALLOCATION_LOCK() int tracyGuard __attribute__((cleanup(tracyAllocationUnlock))) = 0; pthread_mutex_lock(&tracyAllocationMutex)
++#else
++#define TRACY_ALLOCATION_LOCK() ((void)0)
++#endif
+ 
+ bool initMemAlloc(const char* appName)
+ {
+@@ -123,21 +132,25 @@
+ void exitMemAlloc(void)
+ {
+     // Return all allocated memory to the OS. Analyze memory usage, dump memory leaks, ...
++    mooringTracyShutdown();
+ }
+ 
+ void* tf_malloc(size_t size)
+ {
++    TRACY_ALLOCATION_LOCK();
+ #ifdef _MSC_VER
+     void* ptr = _aligned_malloc(size, MIN_ALLOC_ALIGNMENT);
+ #else
+     void* ptr = malloc(size);
+ #endif
+ 
++    MTRACY_ALLOC(ptr, size, "Forge CPU");
+     return ptr;
+ }
+ 
+ void* tf_calloc(size_t count, size_t size)
+ {
++    TRACY_ALLOCATION_LOCK();
+ #ifdef _MSC_VER
+     size_t sz = count * size;
+     void*  ptr = tf_malloc(sz);
+@@ -146,11 +159,13 @@
+     void* ptr = calloc(count, size);
+ #endif
+ 
++    MTRACY_ALLOC(ptr, count * size, "Forge CPU");
+     return ptr;
+ }
+ 
+ void* tf_memalign(size_t alignment, size_t size)
+ {
++    TRACY_ALLOCATION_LOCK();
+ #ifdef _MSC_VER
+     void* ptr = _aligned_malloc(size, alignment);
+ #else
+@@ -162,6 +177,7 @@
+     }
+ #endif
+ 
++    MTRACY_ALLOC(ptr, size, "Forge CPU");
+     return ptr;
+ }
+ 
+@@ -178,17 +194,26 @@
+ 
+ void* tf_realloc(void* ptr, size_t size)
+ {
++    TRACY_ALLOCATION_LOCK();
+ #ifdef _MSC_VER
+     void* reallocPtr = _aligned_realloc(ptr, size, MIN_ALLOC_ALIGNMENT);
+ #else
+     void* reallocPtr = realloc(ptr, size);
+ #endif
+ 
++    // A failed realloc retains the old block. Darwin realloc(p, 0) succeeds
++    // with a minimum allocation, so a null result never releases p here.
++    if (reallocPtr) {
++        MTRACY_FREE(ptr, "Forge CPU");
++        MTRACY_ALLOC(reallocPtr, size, "Forge CPU");
++    }
+     return reallocPtr;
+ }
+ 
+ void tf_free(void* ptr)
+ {
++    TRACY_ALLOCATION_LOCK();
++    MTRACY_FREE(ptr, "Forge CPU");
+ #ifdef _MSC_VER
+     _aligned_free(ptr);
+ #else
+--- a/Common_3/Utilities/ThirdParty/OpenSource/FluidStudios/MemoryManager/mmgr.c
++++ b/Common_3/Utilities/ThirdParty/OpenSource/FluidStudios/MemoryManager/mmgr.c
+@@ -870,6 +870,7 @@
+     CloseHandle(gProcessHandle);
+ #endif
+ #endif
++    mooringTracyShutdown();
+ }
+ 
+ TFMemoryStatistics memGetStatistics(void)
+@@ -1284,6 +1285,7 @@
+         Log("[D] EXIT : mmgrAllocator()");
+ #endif
+ 
++        MTRACY_ALLOC(au->reportedAddress, au->reportedSize, "Forge CPU");
+         MUTEX_UNLOCK(allocMutex);
+         return au->reportedAddress;
+     }
+@@ -1556,6 +1558,8 @@
+         Log("[D] EXIT : mmgrReallocator()");
+ #endif
+ 
++        MTRACY_FREE(reportedAddress, "Forge CPU");
++        MTRACY_ALLOC(au->reportedAddress, au->reportedSize, "Forge CPU");
+         MUTEX_UNLOCK(allocMutex);
+         return au->reportedAddress;
+     }
+@@ -1638,6 +1642,7 @@
+ 
+         // Do the deallocation
+ 
++        MTRACY_FREE(au->reportedAddress, "Forge CPU");
+         free(au->actualAddress);
+ 
+         // Remove this allocation unit from the hash table
+--- a/Common_3/Utilities/Threading/ThreadSystem.c
++++ b/Common_3/Utilities/Threading/ThreadSystem.c
+@@ -138,6 +138,8 @@
+     {
+         if (task.func)
+         {
++            MTRACY_ZONE("Worker task");
++            MTRACY_VALUE(tid);
+             task.func(task.user, tid);
+             decrementWaitingTaskCount(t);
+         }
+@@ -152,6 +154,7 @@
+ 
+ bool threadSystemInit(ThreadSystem* out, const struct ThreadSystemInitDesc* desc)
+ {
++    MTRACY_ZONE("threadSystemInit");
+     *out = NULL;
+     if (desc->threadCount == 0) // dummy run
+         return true;
+@@ -229,6 +232,7 @@
+ 
+ void threadSystemExit(ThreadSystem* thandle, const struct ThreadSystemExitDesc* desc)
+ {
++    MTRACY_ZONE("threadSystemExit");
+     struct ThreadSystemData* t = *thandle;
+     if (!t)
+         return;
+@@ -259,6 +263,7 @@
+ 
+ void threadSystemAddTasks(ThreadSystem thandle, TaskFunc func, uint64_t count, uint64_t userSize, void* users)
+ {
++    MTRACY_ZONE("threadSystemAddTasks");
+     if (count == 0)
+         return;
+     if (!VERIFY(func))
+@@ -300,6 +305,7 @@
+ 
+ bool threadSystemAssist(ThreadSystem thandle)
+ {
++    MTRACY_ZONE("threadSystemAssist");
+     struct ThreadSystemData* t = thandle;
+     if (!t)
+         return false;
+@@ -307,6 +313,7 @@
+     struct ThreadSystemTask task = getTask(t, UINT64_MAX);
+     if (task.func)
+     {
++        MTRACY_ZONE("Assisted task");
+         task.func(task.user, UINT64_MAX);
+         decrementWaitingTaskCount(t);
+     }
+@@ -315,6 +322,7 @@
+ 
+ bool threadSystemWaitIdleTimeout(ThreadSystem thandle, uint32_t msTimeout)
+ {
++    MTRACY_ZONE("threadSystemWaitIdleTimeout");
+     struct ThreadSystemData* t = thandle;
+     if (!t)
+         return true;
+@@ -343,6 +351,7 @@
+ 
+ void threadSystemWaitIdle(ThreadSystem thandle)
+ {
++    MTRACY_ZONE("threadSystemWaitIdle");
+     struct ThreadSystemData* t = thandle;
+     if (!t)
+         return;

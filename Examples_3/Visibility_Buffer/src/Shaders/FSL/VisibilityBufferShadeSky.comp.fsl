@@ -1,0 +1,68 @@
+/*
+ * Copyright (c) 2017-2026 The Forge Interactive Inc.
+ *
+ * This file is part of The-Forge
+ * (see https://github.com/ConfettiFX/The-Forge).
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+*/
+
+// USERMACRO: SAMPLE_COUNT [1]
+#include "VisibilityBufferResources.h.fsl"
+#include "ShadeCompute.srt.h"
+
+float2 ComputeScreenPosFromPixel(uint2 pixel)
+{
+	float2 pixelUv = (float2(pixel) + f2(0.5f)) * gPerFrameConstants.twoOverRes;
+	return float2(pixelUv.x - 1.0f, 1.0f - pixelUv.y);
+}
+
+float3 ShadeSkyPixel(float2 screenPos)
+{
+#if defined(TARGET_QUEST) || defined(TARGET_HOLOLENS2)
+	float4x4 invProjViewOrigin = gUniformCameraSky.invProjViewOrigin.mat[0];
+#else
+	float4x4 invProjViewOrigin = gUniformCameraSky.invProjViewOrigin.mat;
+#endif
+	float3 skyTexCoord = mul(invProjViewOrigin, float4(screenPos.x, screenPos.y, 1, 1)).xyz;
+	return SampleLvlTexCube(gSkyboxTex, gSamplerBilinearWrap, skyTexCoord, 0.0f).xyz;
+}
+
+// Background fill for the compute path: the pixel-command lists only cover opaque geometry, so this pass writes
+// the skybox into every pixel whose visibility buffer is empty. One thread per pixel over the full render area.
+ROOT_SIGNATURE(ComputeRootSignature)
+NUM_THREADS(8, 8, 1)
+void CS_MAIN(SV_DispatchThreadID(uint3) threadID)
+{
+	INIT_MAIN;
+	uint2 pixel = threadID.xy;
+	if (pixel.x >= gPerFrameConstants.mRenderWidth || pixel.y >= gPerFrameConstants.mRenderHeight)
+	{
+		RETURN();
+	}
+
+	float4 visibilityRaw = LoadTex2D(gVBTex, gDepthSampler, pixel, 0);
+	uint packedVisibility = packUnorm4x8(visibilityRaw);
+	if (packedVisibility == ~0u)
+	{
+		float2 screenPos = ComputeScreenPosFromPixel(pixel);
+		float3 skyColor = ShadeSkyPixel(screenPos);
+		Write2D(gShadeOutput, int2(pixel), float4(skyColor, 1.0f));
+	}
+	RETURN();
+}

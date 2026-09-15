@@ -1,0 +1,6 @@
+BEGIN_SRT(PlatformProbe)
+    BEGIN_SRT_SET(PerFrame)
+        DECL_TEXTURE(PerFrame, Tex2D(float4), gPattern)
+        DECL_RWBUFFER(PerFrame, RWBuffer(uint), gResults)
+    END_SRT_SET(PerFrame)
+END_SRT(PlatformProbe)

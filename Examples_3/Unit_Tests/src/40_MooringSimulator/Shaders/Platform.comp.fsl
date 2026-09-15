@@ -1,0 +1,11 @@
+#include "Platform.srt.h"
+NUM_THREADS(8, 8, 1)
+void CS_MAIN(SV_DispatchThreadID(uint3) id)
+{
+    INIT_MAIN;
+    uint index = id.y * 8 + id.x;
+    float2 uv = (float2(id.xy) + 0.5) / 8.0;
+    float4 color = SampleLvlTex2D(gPattern, gSamplerPointClamp, uv, 0.0);
+    gResults[index] = uint(round(color.r * 255.0)) + index * 7u;
+    RETURN();
+}

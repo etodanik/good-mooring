@@ -1,0 +1,45 @@
+// The persistent environment is shared by sky, reflections and distance haze.
+float2 skyPixel(float3 direction,uint height)
+{
+    float2 uv=float2(atan2(direction.z,direction.x)/6.28318530718+.5,acos(clamp(direction.y,-1.0,1.0))/3.14159265359);
+    return uv*float2(height*2,height)-.5;
+}
+float4 sampleSkyLevel(float3 direction,uint fullHeight,uint mip)
+{
+    uint height=fullHeight>>mip;
+    float2 pixel=skyPixel(direction,height);
+    pixel.y=clamp(pixel.y,0.0,float(height-1));
+    return SampleLvlTex2D(gSkyRadiance,gSamplerBilinearWrap,(pixel+.5)/float2(height*2,height),mip);
+}
+float4 skyCubicWeights(float f)
+{
+    float f2=f*f, f3=f2*f;
+    return float4(1-3*f+3*f2-f3,4-6*f2+3*f3,1+3*f+3*f2-3*f3,f3)/6;
+}
+float4 sampleSky(float3 direction,uint height)
+{
+    // Positive cubic weights remove magnified cache cells without ringing
+    // around bright cloud edges or inventing negative radiance.
+    float2 pixel=skyPixel(direction,height);
+    float2 base=floor(pixel)-1;
+    float4 wx=skyCubicWeights(frac(pixel.x)), wy=skyCubicWeights(frac(pixel.y));
+    // Pair positive B-spline weights into four hardware bilinear fetches
+    // (Sigg/Hadwiger). Longitude wraps; latitude clamps at the pole texels.
+    float2 gx=wx.xz+wx.yw, gy=wy.xz+wy.yw;
+    float2 x=(base.x+float2(0,2)+wx.yw/gx+.5)/float(height*2);
+    float2 y=(clamp(base.y+float2(0,2)+wy.yw/gy,0.0,float(height-1))+.5)/float(height);
+    float4 a=SampleLvlTex2D(gSkyRadiance,gSamplerBilinearWrap,float2(x.x,y.x),0);
+    float4 b=SampleLvlTex2D(gSkyRadiance,gSamplerBilinearWrap,float2(x.y,y.x),0);
+    float4 c=SampleLvlTex2D(gSkyRadiance,gSamplerBilinearWrap,float2(x.x,y.y),0);
+    float4 d=SampleLvlTex2D(gSkyRadiance,gSamplerBilinearWrap,float2(x.y,y.y),0);
+    return (a*gx.x+b*gx.y)*gy.x+(c*gx.x+d*gx.y)*gy.y;
+}
+float3 sampleRoughSky(float3 direction,uint height,float slopeVariance)
+{
+    // Reflecting a normal doubles its angular spread. The same unresolved
+    // slope variance broadens both the sun BRDF and environment reflection.
+    float angle=2*sqrt(slopeVariance);
+    float lod=clamp(log2(max(1.0,angle*float(height)/3.14159265359)),0.0,log2(float(height)));
+    uint a=uint(floor(lod)), b=min(a+1,uint(log2(float(height))));
+    return lerp(sampleSkyLevel(direction,height,a).rgb,sampleSkyLevel(direction,height,b).rgb,frac(lod));
+}

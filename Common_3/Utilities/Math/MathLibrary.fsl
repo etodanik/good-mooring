@@ -1,0 +1,2906 @@
+/*
+ * Copyright (c) 2017-2026 The Forge Interactive Inc.
+ *
+ * This file is part of The-Forge
+ * (see https://github.com/ConfettiFX/The-Forge).
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is istributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+#define PI 3.14159265358979323846
+
+transpile quat   f4ToQuat(float4 f) { return quat(f.x, f.y, f.z, f.w); }
+transpile float4 quatTof4(quat q) { return float4(q.x, q.y, q.z, q.w); }
+
+transpile float2        f2Make(float x, float y) { return float2(x, y); }
+transpile float3        f3Make(float x, float y, float z) { return float3(x, y, z); }
+transpile float3Aligned f3AlignedMake(float x, float y, float z) { return float3Aligned(x, y, z); }
+transpile float4        f4Make(float x, float y, float z, float w) { return float4(x, y, z, w); }
+
+transpile float2        f2MakeScalar(float s) { return float2(s, s); }
+transpile float3        f3MakeScalar(float s) { return float3(s, s, s); }
+transpile float3Aligned f3AlignedMakeScalar(float s) { return float3Aligned(s, s, s); }
+transpile float4        f4MakeScalar(float s) { return float4(s, s, s, s); }
+
+transpile float2 f3GetXY(float3 v) { return float2(v.x, v.y); }
+transpile float3 f4GetXYZ(float4 v) { return float3(v.x, v.y, v.z); }
+transpile float2 f4GetXY(float4 v) { return float2(v.x, v.y); }
+
+transpile float4 f4Fromf3(float3 v, float w) { return float4(v.x, v.y, v.z, w); }
+!
+
+    transpile double2
+    d2Make(double x, double y)
+{
+    return double2(x, y);
+}
+transpile double3        d3Make(double x, double y, double z) { return double3(x, y, z); }
+transpile double3Aligned d3AlignedMake(double x, double y, double z) { return double3Aligned(x, y, z); }
+transpile double4        d4Make(double x, double y, double z, double w) { return double4(x, y, z, w); }
+
+transpile double2        d2MakeScalar(double s) { return double2(s, s); }
+transpile double3        d3MakeScalar(double s) { return double3(s, s, s); }
+transpile double3Aligned d3AlignedMakeScalar(double s) { return double3Aligned(s, s, s); }
+transpile double4        d4MakeScalar(double s) { return double4(s, s, s, s); }
+
+transpile double2 d3GetXY(double3 v) { return double2(v.x, v.y); }
+transpile double3 d4GetXYZ(double4 v) { return double3(v.x, v.y, v.z); }
+transpile double2 d4GetXY(double4 v) { return double2(v.x, v.y); }
+
+transpile int2        i2Make(int x, int y) { return int2(x, y); }
+transpile int3        i3Make(int x, int y, int z) { return int3(x, y, z); }
+transpile int3Aligned i3AlignedMake(int x, int y, int z) { return int3Aligned(x, y, z); }
+transpile int4        i4Make(int x, int y, int z, int w) { return int4(x, y, z, w); }
+
+transpile int2        i2MakeScalar(int s) { return int2(s, s); }
+transpile int3        i3MakeScalar(int s) { return int3(s, s, s); }
+transpile int3Aligned i3AlignedMakeScalar(int s) { return int3Aligned(s, s, s); }
+transpile int4        i4MakeScalar(int s) { return int4(s, s, s, s); }
+
+transpile uint2        u2Make(uint x, uint y) { return uint2(x, y); }
+transpile uint3        u3Make(uint x, uint y, uint z) { return uint3(x, y, z); }
+transpile uint3Aligned u3AlignedMake(uint x, uint y, uint z) { return uint3Aligned(x, y, z); }
+transpile uint4        u4Make(uint x, uint y, uint z, uint w) { return uint4(x, y, z, w); }
+
+transpile uint2        u2MakeScalar(uint s) { return uint2(s, s); }
+transpile uint3        u3MakeScalar(uint s) { return uint3(s, s, s); }
+transpile uint3Aligned u3AlignedMakeScalar(uint s) { return uint3Aligned(s, s, s); }
+transpile uint4        u4MakeScalar(uint s) { return uint4(s, s, s, s); }
+
+transpile float2 f2Add(float2 a, float2 b) { return float2(a.x + b.x, a.y + b.y); }
+transpile float2 f2Sub(float2 a, float2 b) { return float2(a.x - b.x, a.y - b.y); }
+transpile float2 f2Mul(float2 a, float2 b) { return float2(a.x * b.x, a.y * b.y); }
+transpile float2 f2Div(float2 a, float2 b) { return float2(a.x / b.x, a.y / b.y); }
+transpile float2 f2MulScalar(float2 a, float s) { return float2(a.x * s, a.y * s); }
+transpile float2 f2DivScalar(float2 a, float s) { return float2(a.x / s, a.y / s); }
+
+transpile float3 f3Add(float3 a, float3 b) { return float3(a.x + b.x, a.y + b.y, a.z + b.z); }
+transpile float3 f3Sub(float3 a, float3 b) { return float3(a.x - b.x, a.y - b.y, a.z - b.z); }
+transpile float3 f3Mul(float3 a, float3 b) { return float3(a.x * b.x, a.y * b.y, a.z * b.z); }
+transpile float3 f3Div(float3 a, float3 b) { return float3(a.x / b.x, a.y / b.y, a.z / b.z); }
+transpile float3 f3MulScalar(float3 a, float s) { return float3(a.x * s, a.y * s, a.z * s); }
+transpile float3 f3DivScalar(float3 a, float s) { return float3(a.x / s, a.y / s, a.z / s); }
+
+transpile float4 f4Add(float4 a, float4 b) { return float4(a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w); }
+transpile float4 f4Sub(float4 a, float4 b) { return float4(a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w); }
+transpile float4 f4Mul(float4 a, float4 b) { return float4(a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w); }
+transpile float4 f4Div(float4 a, float4 b) { return float4(a.x / b.x, a.y / b.y, a.z / b.z, a.w / b.w); }
+transpile float4 f4MulScalar(float4 a, float s) { return float4(a.x * s, a.y * s, a.z * s, a.w * s); }
+transpile float4 f4DivScalar(float4 a, float s) { return float4(a.x / s, a.y / s, a.z / s, a.w / s); }
+
+transpile quat quatAdd(quat a, quat b) { return quat(a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w); }
+transpile quat quatSub(quat a, quat b) { return quat(a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w); }
+transpile quat quatMul(quat q0, quat q1)
+{
+    return quat(q0.w * q1.x + q0.x * q1.w + q0.y * q1.z - q0.z * q1.y, q0.w * q1.y + q0.y * q1.w + q0.z * q1.x - q0.x * q1.z,
+                q0.w * q1.z + q0.z * q1.w + q0.x * q1.y - q0.y * q1.x, q0.w * q1.w - q0.x * q1.x - q0.y * q1.y - q0.z * q1.z);
+}
+transpile quat quatDiv(quat a, quat b) { return quat(a.x / b.x, a.y / b.y, a.z / b.z, a.w / b.w); }
+transpile quat quatMulScalar(quat a, float s) { return quat(a.x * s, a.y * s, a.z * s, a.w * s); }
+transpile quat quatDivScalar(quat a, float s) { return quat(a.x / s, a.y / s, a.z / s, a.w / s); }
+
+transpile double2 d2Add(double2 a, double2 b) { return double2(a.x + b.x, a.y + b.y); }
+transpile double2 d2Sub(double2 a, double2 b) { return double2(a.x - b.x, a.y - b.y); }
+transpile double2 d2Mul(double2 a, double2 b) { return double2(a.x * b.x, a.y * b.y); }
+transpile double2 d2Div(double2 a, double2 b) { return double2(a.x / b.x, a.y / b.y); }
+transpile double2 d2MulScalar(double2 a, double s) { return double2(a.x * s, a.y * s); }
+transpile double2 d2DivScalar(double2 a, double s) { return double2(a.x / s, a.y / s); }
+
+transpile double3 d3Add(double3 a, double3 b) { return double3(a.x + b.x, a.y + b.y, a.z + b.z); }
+transpile double3 d3Sub(double3 a, double3 b) { return double3(a.x - b.x, a.y - b.y, a.z - b.z); }
+transpile double3 d3Mul(double3 a, double3 b) { return double3(a.x * b.x, a.y * b.y, a.z * b.z); }
+transpile double3 d3Div(double3 a, double3 b) { return double3(a.x / b.x, a.y / b.y, a.z / b.z); }
+transpile double3 d3MulScalar(double3 a, double s) { return double3(a.x * s, a.y * s, a.z * s); }
+transpile double3 d3DivScalar(double3 a, double s) { return double3(a.x / s, a.y / s, a.z / s); }
+
+transpile double4 d4Add(double4 a, double4 b) { return double4(a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w); }
+transpile double4 d4Sub(double4 a, double4 b) { return double4(a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w); }
+transpile double4 d4Mul(double4 a, double4 b) { return double4(a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w); }
+transpile double4 d4Div(double4 a, double4 b) { return double4(a.x / b.x, a.y / b.y, a.z / b.z, a.w / b.w); }
+transpile double4 d4MulScalar(double4 a, double s) { return double4(a.x * s, a.y * s, a.z * s, a.w * s); }
+transpile double4 d4DivScalar(double4 a, double s) { return double4(a.x / s, a.y / s, a.z / s, a.w / s); }
+
+transpile int2 i2Add(int2 a, int2 b) { return int2(a.x + b.x, a.y + b.y); }
+transpile int2 i2Sub(int2 a, int2 b) { return int2(a.x - b.x, a.y - b.y); }
+transpile int2 i2Mul(int2 a, int2 b) { return int2(a.x * b.x, a.y * b.y); }
+transpile int2 i2Div(int2 a, int2 b) { return int2(a.x / b.x, a.y / b.y); }
+transpile int2 i2MulScalar(int2 a, int s) { return int2(a.x * s, a.y * s); }
+transpile int2 i2DivScalar(int2 a, int s) { return int2(a.x / s, a.y / s); }
+
+transpile int3 i3Add(int3 a, int3 b) { return int3(a.x + b.x, a.y + b.y, a.z + b.z); }
+transpile int3 i3Sub(int3 a, int3 b) { return int3(a.x - b.x, a.y - b.y, a.z - b.z); }
+transpile int3 i3Mul(int3 a, int3 b) { return int3(a.x * b.x, a.y * b.y, a.z * b.z); }
+transpile int3 i3Div(int3 a, int3 b) { return int3(a.x / b.x, a.y / b.y, a.z / b.z); }
+transpile int3 i3MulScalar(int3 a, int s) { return int3(a.x * s, a.y * s, a.z * s); }
+transpile int3 i3DivScalar(int3 a, int s) { return int3(a.x / s, a.y / s, a.z / s); }
+
+transpile int4 i4Add(int4 a, int4 b) { return int4(a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w); }
+transpile int4 i4Sub(int4 a, int4 b) { return int4(a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w); }
+transpile int4 i4Mul(int4 a, int4 b) { return int4(a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w); }
+transpile int4 i4Div(int4 a, int4 b) { return int4(a.x / b.x, a.y / b.y, a.z / b.z, a.w / b.w); }
+transpile int4 i4MulScalar(int4 a, int s) { return int4(a.x * s, a.y * s, a.z * s, a.w * s); }
+transpile int4 i4DivScalar(int4 a, int s) { return int4(a.x / s, a.y / s, a.z / s, a.w / s); }
+
+transpile uint2 u2Add(uint2 a, uint2 b) { return uint2(a.x + b.x, a.y + b.y); }
+transpile uint2 u2Sub(uint2 a, uint2 b) { return uint2(a.x - b.x, a.y - b.y); }
+transpile uint2 u2Mul(uint2 a, uint2 b) { return uint2(a.x * b.x, a.y * b.y); }
+transpile uint2 u2Div(uint2 a, uint2 b) { return uint2(a.x / b.x, a.y / b.y); }
+transpile uint2 u2MulScalar(uint2 a, uint s) { return uint2(a.x * s, a.y * s); }
+transpile uint2 u2DivScalar(uint2 a, uint s) { return uint2(a.x / s, a.y / s); }
+
+transpile uint3 u3Add(uint3 a, uint3 b) { return uint3(a.x + b.x, a.y + b.y, a.z + b.z); }
+transpile uint3 u3Sub(uint3 a, uint3 b) { return uint3(a.x - b.x, a.y - b.y, a.z - b.z); }
+transpile uint3 u3Mul(uint3 a, uint3 b) { return uint3(a.x * b.x, a.y * b.y, a.z * b.z); }
+transpile uint3 u3Div(uint3 a, uint3 b) { return uint3(a.x / b.x, a.y / b.y, a.z / b.z); }
+transpile uint3 u3MulScalar(uint3 a, uint s) { return uint3(a.x * s, a.y * s, a.z * s); }
+transpile uint3 u3DivScalar(uint3 a, uint s) { return uint3(a.x / s, a.y / s, a.z / s); }
+
+transpile uint4 u4Add(uint4 a, uint4 b) { return uint4(a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w); }
+transpile uint4 u4Sub(uint4 a, uint4 b) { return uint4(a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w); }
+transpile uint4 u4Mul(uint4 a, uint4 b) { return uint4(a.x * b.x, a.y * b.y, a.z * b.z, a.w * b.w); }
+transpile uint4 u4Div(uint4 a, uint4 b) { return uint4(a.x / b.x, a.y / b.y, a.z / b.z, a.w / b.w); }
+transpile uint4 u4MulScalar(uint4 a, uint s) { return uint4(a.x * s, a.y * s, a.z * s, a.w * s); }
+transpile uint4 u4DivScalar(uint4 a, uint s) { return uint4(a.x / s, a.y / s, a.z / s, a.w / s); }
+
+transpile float f2LengthSqr(float2 a) { return a.x * a.x + a.y * a.y; }
+transpile float f3LengthSqr(float3 a) { return a.x * a.x + a.y * a.y + a.z * a.z; }
+transpile float f4LengthSqr(float4 a) { return a.x * a.x + a.y * a.y + a.z * a.z + a.w * a.w; }
+transpile float quatLengthSqr(quat a) { return a.x * a.x + a.y * a.y + a.z * a.z + a.w * a.w; }
+
+transpile float f2Length(float2 a) { return sqrt(f2LengthSqr(a)); }
+transpile float f3Length(float3 a) { return sqrt(f3LengthSqr(a)); }
+transpile float f4Length(float4 a) { return sqrt(f4LengthSqr(a)); }
+transpile float quatLength(quat a) { return sqrt(quatLengthSqr(a)); }
+
+transpile float2 f2Normalize(float2 a)
+{
+    float lenSqr = f2LengthSqr(a);
+    if (lenSqr > 0.0)
+    {
+        float lenInv = 1.0 / sqrt(float(lenSqr));
+        return float2(a.x * lenInv, a.y * lenInv);
+    }
+    return float2(0.0, 0.0);
+}
+
+transpile float3 f3Normalize(float3 a)
+{
+    float lenSqr = f3LengthSqr(a);
+    if (lenSqr > 0.0)
+    {
+        float lenInv = 1.0 / sqrt(float(lenSqr));
+        return float3(a.x * lenInv, a.y * lenInv, a.z * lenInv);
+    }
+    return float3(0.0, 0.0, 0.0);
+}
+
+transpile float4 f4Normalize(float4 a)
+{
+    float lenSqr = f4LengthSqr(a);
+    if (lenSqr > 0.0)
+    {
+        float lenInv = 1.0 / sqrt(float(lenSqr));
+        return float4(a.x * lenInv, a.y * lenInv, a.z * lenInv, a.w * lenInv);
+    }
+    return float4(0.0, 0.0, 0.0, 0.0);
+}
+
+transpile float f2Dot(float2 a, float2 b) { return a.x * b.x + a.y * b.y; }
+transpile float f3Dot(float3 a, float3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+transpile float f4Dot(float4 a, float4 b) { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
+transpile float quatDot(quat a, quat b) { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
+
+transpile float fLerp(float a, float b, float t) { return a + (b - a) * t; }
+
+transpile float2 f2Lerp(float2 a, float2 b, float t) { return f2Add(a, f2MulScalar(f2Sub(b, a), t)); }
+transpile float3 f3Lerp(float3 a, float3 b, float t) { return f3Add(a, f3MulScalar(f3Sub(b, a), t)); }
+transpile float4 f4Lerp(float4 a, float4 b, float t) { return f4Add(a, f4MulScalar(f4Sub(b, a), t)); }
+transpile quat   quatLerp(quat a, quat b, float t) { return quatAdd(a, quatMulScalar(quatSub(b, a), t)); }
+
+transpile float3 f3Cross(float3 a, float3 b)
+{
+    return float3(((a.y * b.z) - (a.z * b.y)), ((a.z * b.x) - (a.x * b.z)), ((a.x * b.y) - (a.y * b.x)));
+}
+
+transpile bool f3IsNormalizedEst(float3 v)
+{
+    float len = f3Length(v);
+    return len >= (1 - 0.000001) && len <= (1 + 0.000001);
+}
+
+transpile f2x2 f2x2Identity()
+{
+    f2x2 m;
+    m[0][0] = 1;
+    m[1][1] = 1;
+
+    m[0][1] = 0;
+    m[1][0] = 0;
+
+    return m;
+}
+transpile f3x3 f3x3Identity()
+{
+    f3x3 m;
+    m[0][0] = 1;
+    m[1][1] = 1;
+    m[2][2] = 1;
+
+    m[0][1] = 0;
+    m[0][2] = 0;
+
+    m[1][0] = 0;
+    m[1][2] = 0;
+
+    m[2][0] = 0;
+    m[2][1] = 0;
+
+    return m;
+}
+transpile f4x4 f4x4Identity()
+{
+    f4x4 m;
+    m[0][0] = 1;
+    m[1][1] = 1;
+    m[2][2] = 1;
+    m[3][3] = 1;
+
+    m[0][1] = 0;
+    m[0][2] = 0;
+    m[0][3] = 0;
+
+    m[1][0] = 0;
+    m[1][2] = 0;
+    m[1][3] = 0;
+
+    m[2][0] = 0;
+    m[2][1] = 0;
+    m[2][3] = 0;
+
+    m[3][0] = 0;
+    m[3][1] = 0;
+    m[3][2] = 0;
+
+    return m;
+}
+
+transpile f2x2 f2x2InitRows(float E00, float E10, float E01, float E11)
+{
+    f2x2 m;
+
+    m[0][0] = E00;
+    m[1][0] = E10;
+
+    m[0][1] = E01;
+    m[1][1] = E11;
+
+    return m;
+}
+transpile f3x3 f3x3InitRows(float E00, float E10, float E20, float E01, float E11, float E21, float E02, float E12, float E22)
+{
+    f3x3 m;
+
+    m[0][0] = E00;
+    m[1][0] = E10;
+    m[2][0] = E20;
+    m[0][1] = E01;
+    m[1][1] = E11;
+    m[2][1] = E21;
+    m[0][2] = E02;
+    m[1][2] = E12;
+    m[2][2] = E22;
+
+    return m;
+}
+transpile f4x4 f4x4InitRows(float E00, float E10, float E20, float E30, float E01, float E11, float E21, float E31, float E02, float E12,
+                            float E22, float E32, float E03, float E13, float E23, float E33)
+{
+    f4x4 m;
+
+    m[0][0] = E00;
+    m[1][0] = E10;
+    m[2][0] = E20;
+    m[3][0] = E30;
+    m[0][1] = E01;
+    m[1][1] = E11;
+    m[2][1] = E21;
+    m[3][1] = E31;
+    m[0][2] = E02;
+    m[1][2] = E12;
+    m[2][2] = E22;
+    m[3][2] = E32;
+    m[0][3] = E03;
+    m[1][3] = E13;
+    m[2][3] = E23;
+    m[3][3] = E33;
+
+    return m;
+}
+
+transpile float f2x2Determinant(f2x2 m) { return m[0][0] * m[1][1] - m[1][0] * m[0][1]; }
+
+transpile float f3x3Determinant(f3x3 m)
+{
+    return m[0][0] * (m[1][1] * m[2][2] - m[2][1] * m[1][2]) - m[1][0] * (m[0][1] * m[2][2] - m[2][1] * m[0][2]) +
+           m[2][0] * (m[0][1] * m[1][2] - m[1][1] * m[0][2]);
+}
+
+transpile float f4x4Determinant(f4x4 m)
+{
+    float det;
+
+    f3x3 mSub;
+
+    // first cofactor
+    mSub[0] = float3(m[1][1], m[1][2], m[1][3]);
+    mSub[1] = float3(m[2][1], m[2][2], m[2][3]);
+    mSub[2] = float3(m[3][1], m[3][2], m[3][3]);
+    det = m[0][0] * f3x3Determinant(mSub);
+
+    // second cofactor
+    mSub[0] = float3(m[0][1], m[0][2], m[0][3]);
+    mSub[1] = float3(m[2][1], m[2][2], m[2][3]);
+    mSub[2] = float3(m[3][1], m[3][2], m[3][3]);
+    det -= m[1][0] * f3x3Determinant(mSub);
+
+    // third cofactor
+    mSub[0] = float3(m[0][1], m[0][2], m[0][3]);
+    mSub[1] = float3(m[1][1], m[1][2], m[1][3]);
+    mSub[2] = float3(m[3][1], m[3][2], m[3][3]);
+    det += m[2][0] * f3x3Determinant(mSub);
+
+    // fourth cofactor
+    mSub[0] = float3(m[0][1], m[0][2], m[0][3]);
+    mSub[1] = float3(m[1][1], m[1][2], m[1][3]);
+    mSub[2] = float3(m[2][1], m[2][2], m[2][3]);
+    det -= m[3][0] * f3x3Determinant(mSub);
+
+    return det;
+}
+
+transpile f2x2 f2x2Transpose(f2x2 m)
+{
+    f2x2 t;
+    t[0][0] = m[0][0];
+    t[1][1] = m[1][1];
+
+    t[0][1] = m[1][0];
+
+    t[1][0] = m[0][1];
+
+    return t;
+}
+
+transpile f3x3 f3x3Transpose(f3x3 m)
+{
+    f3x3 t;
+    t[0][0] = m[0][0];
+    t[1][1] = m[1][1];
+    t[2][2] = m[2][2];
+
+    t[0][1] = m[1][0];
+    t[0][2] = m[2][0];
+
+    t[1][0] = m[0][1];
+    t[1][2] = m[2][1];
+
+    t[2][0] = m[0][2];
+    t[2][1] = m[1][2];
+
+    return t;
+}
+transpile f4x4 f4x4Transpose(f4x4 m)
+{
+    f4x4 t;
+    t[0][0] = m[0][0];
+    t[1][1] = m[1][1];
+    t[2][2] = m[2][2];
+    t[3][3] = m[3][3];
+
+    t[0][1] = m[1][0];
+    t[0][2] = m[2][0];
+    t[0][3] = m[3][0];
+
+    t[1][0] = m[0][1];
+    t[1][2] = m[2][1];
+    t[1][3] = m[3][1];
+
+    t[2][0] = m[0][2];
+    t[2][1] = m[1][2];
+    t[2][3] = m[3][2];
+
+    t[3][0] = m[0][3];
+    t[3][1] = m[1][3];
+    t[3][2] = m[2][3];
+
+    return t;
+}
+
+transpile f2x2 f2x2Mul(f2x2 a, f2x2 b)
+{
+    f2x2 at = f2x2Transpose(a);
+
+    f2x2 c;
+
+    c[0][0] = f2Dot(at[0], b[0]);
+    c[0][1] = f2Dot(at[1], b[0]);
+    c[1][0] = f2Dot(at[0], b[1]);
+    c[1][1] = f2Dot(at[1], b[1]);
+
+    return c;
+}
+transpile f3x3 f3x3Mul(f3x3 a, f3x3 b)
+{
+    f3x3 at = f3x3Transpose(a);
+
+    f3x3 c;
+
+    c[0][0] = f3Dot(at[0], b[0]);
+    c[0][1] = f3Dot(at[1], b[0]);
+    c[0][2] = f3Dot(at[2], b[0]);
+
+    c[1][0] = f3Dot(at[0], b[1]);
+    c[1][1] = f3Dot(at[1], b[1]);
+    c[1][2] = f3Dot(at[2], b[1]);
+
+    c[2][0] = f3Dot(at[0], b[2]);
+    c[2][1] = f3Dot(at[1], b[2]);
+    c[2][2] = f3Dot(at[2], b[2]);
+
+    return c;
+}
+transpile f4x4 f4x4Mul(f4x4 a, f4x4 b)
+{
+    f4x4 at = f4x4Transpose(a);
+
+    f4x4 c;
+
+    c[0][0] = f4Dot(at[0], b[0]);
+    c[0][1] = f4Dot(at[1], b[0]);
+    c[0][2] = f4Dot(at[2], b[0]);
+    c[0][3] = f4Dot(at[3], b[0]);
+
+    c[1][0] = f4Dot(at[0], b[1]);
+    c[1][1] = f4Dot(at[1], b[1]);
+    c[1][2] = f4Dot(at[2], b[1]);
+    c[1][3] = f4Dot(at[3], b[1]);
+
+    c[2][0] = f4Dot(at[0], b[2]);
+    c[2][1] = f4Dot(at[1], b[2]);
+    c[2][2] = f4Dot(at[2], b[2]);
+    c[2][3] = f4Dot(at[3], b[2]);
+
+    c[3][0] = f4Dot(at[0], b[3]);
+    c[3][1] = f4Dot(at[1], b[3]);
+    c[3][2] = f4Dot(at[2], b[3]);
+    c[3][3] = f4Dot(at[3], b[3]);
+
+    return c;
+}
+
+transpile float2 f2x2Mulf2(f2x2 m, float2 v)
+{
+    float2 result;
+    result[0] = f2Dot(float2(m[0][0], m[1][0]), v);
+    result[1] = f2Dot(float2(m[0][1], m[1][1]), v);
+
+    return result;
+}
+transpile f2x2   f2x2MulScalar(f2x2 m, float s) { return f2x2InitRows(m[0][0] * s, m[1][0] * s, m[0][1] * s, m[1][1] * s); }
+transpile float2 f2Mulf2x2(float2 v, f2x2 m)
+{
+    float2 result;
+    result[0] = f2Dot(v, m[0]);
+    result[1] = f2Dot(v, m[1]);
+
+    return result;
+}
+transpile float3 f3x3Mulf3(f3x3 a, float3 v)
+{
+    float3 result;
+    result[0] = f3Dot(float3(a[0][0], a[1][0], a[2][0]), v);
+    result[1] = f3Dot(float3(a[0][1], a[1][1], a[2][1]), v);
+    result[2] = f3Dot(float3(a[0][2], a[1][2], a[2][2]), v);
+
+    return result;
+}
+transpile float3 f3Mulf3x3(float3 v, f3x3 m)
+{
+    float3 result;
+    result[0] = f3Dot(v, m[0]);
+    result[1] = f3Dot(v, m[1]);
+    result[2] = f3Dot(v, m[2]);
+
+    return result;
+}
+transpile f3x3 f3x3MulScalar(f3x3 m, float s)
+{
+    return f3x3InitRows(m[0][0] * s, m[1][0] * s, m[2][0] * s, m[0][1] * s, m[1][1] * s, m[2][1] * s, m[0][2] * s, m[1][2] * s,
+                        m[2][2] * s);
+}
+transpile float4 f4x4Mulf4(f4x4 a, float4 v)
+{
+    float4 result;
+    result[0] = f4Dot(float4(a[0][0], a[1][0], a[2][0], a[3][0]), v);
+    result[1] = f4Dot(float4(a[0][1], a[1][1], a[2][1], a[3][1]), v);
+    result[2] = f4Dot(float4(a[0][2], a[1][2], a[2][2], a[3][2]), v);
+    result[3] = f4Dot(float4(a[0][3], a[1][3], a[2][3], a[3][3]), v);
+
+    return result;
+}
+transpile float4 f4Mulf4x4(float4 v, f4x4 m)
+{
+    float4 result;
+    result[0] = f4Dot(v, m[0]);
+    result[1] = f4Dot(v, m[1]);
+    result[2] = f4Dot(v, m[2]);
+    result[3] = f4Dot(v, m[3]);
+
+    return result;
+}
+transpile f4x4 f4x4MulScalar(f4x4 m, float s)
+{
+    return f4x4InitRows(m[0][0] * s, m[1][0] * s, m[2][0] * s, m[3][0] * s, m[0][1] * s, m[1][1] * s, m[2][1] * s, m[3][1] * s, m[0][2] * s,
+                        m[1][2] * s, m[2][2] * s, m[3][2] * s, m[0][3] * s, m[1][3] * s, m[2][3] * s, m[3][3] * s);
+}
+
+transpile f2x2 f2x2Inverse(f2x2 m)
+{
+    float a = m[0].x;
+    float b = m[0].y;
+    float c = m[1].x;
+    float d = m[1].y;
+
+    float det = a * d - b * c;
+    float invDet = 1.0 / det;
+
+    f2x2 inv;
+    inv[0] = float2(d * invDet, -b * invDet);
+    inv[1] = float2(-c * invDet, a * invDet);
+    return inv;
+}
+
+transpile f3x3 f3x3Inverse(f3x3 m)
+{
+    float3 tmp0 = f3Cross(m[1], m[2]);
+    float3 tmp1 = f3Cross(m[2], m[0]);
+    float3 tmp2 = f3Cross(m[0], m[1]);
+    float  detInv = (1.0 / f3Dot(m[2], tmp2));
+
+    f3x3 result;
+    result[0] = float3((tmp0.x * detInv), (tmp1.x * detInv), (tmp2.x * detInv));
+    result[1] = float3((tmp0.y * detInv), (tmp1.y * detInv), (tmp2.y * detInv));
+    result[2] = float3((tmp0.z * detInv), (tmp1.z * detInv), (tmp2.z * detInv));
+
+    return result;
+}
+
+transpile f4x4 f4x4Inverse(f4x4 mat)
+{
+    float mA = mat[0].x;
+    float mB = mat[0].y;
+    float mC = mat[0].z;
+    float mD = mat[0].w;
+    float mE = mat[1].x;
+    float mF = mat[1].y;
+    float mG = mat[1].z;
+    float mH = mat[1].w;
+    float mI = mat[2].x;
+    float mJ = mat[2].y;
+    float mK = mat[2].z;
+    float mL = mat[2].w;
+    float mM = mat[3].x;
+    float mN = mat[3].y;
+    float mO = mat[3].z;
+    float mP = mat[3].w;
+    float tmp0 = ((mK * mD) - (mC * mL));
+    float tmp1 = ((mO * mH) - (mG * mP));
+    float tmp2 = ((mB * mK) - (mJ * mC));
+    float tmp3 = ((mF * mO) - (mN * mG));
+    float tmp4 = ((mJ * mD) - (mB * mL));
+    float tmp5 = ((mN * mH) - (mF * mP));
+
+    float4 res0;
+    float4 res1;
+    float4 res2;
+    float4 res3;
+
+    res0.x = ((((mJ * tmp1) - (mL * tmp3)) - (mK * tmp5)));
+    res0.y = ((((mN * tmp0) - (mP * tmp2)) - (mO * tmp4)));
+    res0.z = ((((mD * tmp3) + (mC * tmp5)) - (mB * tmp1)));
+    res0.w = ((((mH * tmp2) + (mG * tmp4)) - (mF * tmp0)));
+    float detInv = (1.0f / ((((mA * res0.x) + (mE * res0.y)) + (mI * res0.z)) + (mM * res0.w)));
+    res1.x = ((mI * tmp1));
+    res1.y = ((mM * tmp0));
+    res1.z = ((mA * tmp1));
+    res1.w = ((mE * tmp0));
+    res3.x = ((mI * tmp3));
+    res3.y = ((mM * tmp2));
+    res3.z = ((mA * tmp3));
+    res3.w = ((mE * tmp2));
+    res2.x = ((mI * tmp5));
+    res2.y = ((mM * tmp4));
+    res2.z = ((mA * tmp5));
+    res2.w = ((mE * tmp4));
+    tmp0 = ((mI * mB) - (mA * mJ));
+    tmp1 = ((mM * mF) - (mE * mN));
+    tmp2 = ((mI * mD) - (mA * mL));
+    tmp3 = ((mM * mH) - (mE * mP));
+    tmp4 = ((mI * mC) - (mA * mK));
+    tmp5 = ((mM * mG) - (mE * mO));
+    res2.x = ((((mL * tmp1) - (mJ * tmp3)) + res2.x));
+    res2.y = ((((mP * tmp0) - (mN * tmp2)) + res2.y));
+    res2.z = ((((mB * tmp3) - (mD * tmp1)) - res2.z));
+    res2.w = ((((mF * tmp2) - (mH * tmp0)) - res2.w));
+    res3.x = ((((mJ * tmp5) - (mK * tmp1)) + res3.x));
+    res3.y = ((((mN * tmp4) - (mO * tmp0)) + res3.y));
+    res3.z = ((((mC * tmp1) - (mB * tmp5)) - res3.z));
+    res3.w = ((((mG * tmp0) - (mF * tmp4)) - res3.w));
+    res1.x = ((((mK * tmp3) - (mL * tmp5)) - res1.x));
+    res1.y = ((((mO * tmp2) - (mP * tmp4)) - res1.y));
+    res1.z = ((((mD * tmp5) - (mC * tmp3)) + res1.z));
+    res1.w = ((((mH * tmp4) - (mG * tmp2)) + res1.w));
+
+    f4x4 inv;
+    inv[0] = f4MulScalar(res0, detInv);
+    inv[1] = f4MulScalar(res1, detInv);
+    inv[2] = f4MulScalar(res2, detInv);
+    inv[3] = f4MulScalar(res3, detInv);
+
+    return inv;
+}
+
+transpile f3x3 f4x4GetUpperf3x3(f4x4 m4)
+{
+    f3x3 m3;
+    m3[0] = f4GetXYZ(m4[0]);
+    m3[1] = f4GetXYZ(m4[1]);
+    m3[2] = f4GetXYZ(m4[2]);
+    return m3;
+}
+transpile f4x4 f4x4SetUpperf3x3(f4x4 m4, f3x3 m3)
+{
+    m4[0] = float4(m3[0].x, m3[0].y, m3[0].z, m4[0].w);
+    m4[1] = float4(m3[1].x, m3[1].y, m3[1].z, m4[1].w);
+    m4[2] = float4(m3[2].x, m3[2].y, m3[2].z, m4[2].w);
+    return m4;
+}
+
+transpile float2 f2MulPerElem(float2 vec0, float2 vec1) { return float2((vec0.x * vec1.x), (vec0.y * vec1.y)); }
+
+transpile float2 f2DivPerElem(float2 vec0, float2 vec1) { return float2((vec0.x / vec1.x), (vec0.y / vec1.y)); }
+
+transpile float2 f2RecipPerElem(float2 vec) { return float2((1.0 / vec.x), (1.0 / vec.y)); }
+
+transpile float2 f2SqrtPerElem(float2 vec) { return float2(sqrt(vec.x), sqrt(vec.y)); }
+
+transpile float2 f2RsqrtPerElem(float2 vec) { return float2((1.0 / sqrt(vec.x)), (1.0 / sqrt(vec.y))); }
+
+transpile float2 f2FabsfPerElem(float2 vec) { return float2(fabsf(vec.x), fabsf(vec.y)); }
+
+transpile float2 f2CopySignPerElem(float2 vec0, float2 vec1)
+{
+    return float2((vec1.x < 0.0) ? -fabsf(vec0.x) : fabsf(vec0.x), (vec1.y < 0.0) ? -fabsf(vec0.y) : fabsf(vec0.y));
+}
+
+transpile float2 f2MaxPerElem(float2 vec0, float2 vec1)
+{
+    return float2((vec0.x > vec1.x) ? vec0.x : vec1.x, (vec0.y > vec1.y) ? vec0.y : vec1.y);
+}
+
+transpile float f2MaxElem(float2 vec) { return (vec.x > vec.y) ? vec.x : vec.y; }
+
+transpile float2 f2MinPerElem(float2 vec0, float2 vec1)
+{
+    return float2((vec0.x < vec1.x) ? vec0.x : vec1.x, (vec0.y < vec1.y) ? vec0.y : vec1.y);
+}
+
+transpile float f2MinElem(float2 vec) { return (vec.x < vec.y) ? vec.x : vec.y; }
+
+transpile float f2Sum(float2 vec) { return vec.x + vec.y; }
+
+transpile float2 f2AbsPerElem(float2 vec) { return float2((vec.x < 0 ? -vec.x : vec.x), (vec.y < 0 ? -vec.y : vec.y)); }
+
+transpile float3 f3MulPerElem(float3 vec0, float3 vec1) { return float3((vec0.x * vec1.x), (vec0.y * vec1.y), (vec0.z * vec1.z)); }
+
+transpile float3 f3DivPerElem(float3 vec0, float3 vec1) { return float3((vec0.x / vec1.x), (vec0.y / vec1.y), (vec0.z / vec1.z)); }
+
+transpile float3 f3RecipPerElem(float3 vec) { return float3((1.0 / vec.x), (1.0 / vec.y), (1.0 / vec.z)); }
+
+transpile float3 f3SqrtPerElem(float3 vec) { return float3(sqrt(vec.x), sqrt(vec.y), sqrt(vec.z)); }
+
+transpile float3 f3RsqrtPerElem(float3 vec) { return float3((1.0 / sqrt(vec.x)), (1.0 / sqrt(vec.y)), (1.0 / sqrt(vec.z))); }
+
+transpile float3 f3FabsfPerElem(float3 vec) { return float3(fabsf(vec.x), fabsf(vec.y), fabsf(vec.z)); }
+
+transpile float3 f3CopySignPerElem(float3 vec0, float3 vec1)
+{
+    return float3((vec1.x < 0.0) ? -fabsf(vec0.x) : fabsf(vec0.x), (vec1.y < 0.0) ? -fabsf(vec0.y) : fabsf(vec0.y),
+                  (vec1.z < 0.0) ? -fabsf(vec0.z) : fabsf(vec0.z));
+}
+
+transpile float3 f3MaxPerElem(float3 vec0, float3 vec1)
+{
+    return float3((vec0.x > vec1.x) ? vec0.x : vec1.x, (vec0.y > vec1.y) ? vec0.y : vec1.y, (vec0.z > vec1.z) ? vec0.z : vec1.z);
+}
+
+transpile float f3MaxElem(float3 vec)
+{
+    float result;
+    result = (vec.x > vec.y) ? vec.x : vec.y;
+    result = (vec.z > result) ? vec.z : result;
+    return result;
+}
+
+transpile float3 f3MinPerElem(float3 vec0, float3 vec1)
+{
+    return float3((vec0.x < vec1.x) ? vec0.x : vec1.x, (vec0.y < vec1.y) ? vec0.y : vec1.y, (vec0.z < vec1.z) ? vec0.z : vec1.z);
+}
+
+transpile float f3MinElem(float3 vec)
+{
+    float result;
+    result = (vec.x < vec.y) ? vec.x : vec.y;
+    result = (vec.z < result) ? vec.z : result;
+    return result;
+}
+
+transpile float f3Sum(float3 vec)
+{
+    float result;
+    result = (vec.x + vec.y);
+    result = (result + vec.z);
+    return result;
+}
+
+transpile float3 f3AbsPerElem(float3 vec)
+{
+    return float3(vec.x < 0 ? -vec.x : vec.x, vec.y < 0 ? -vec.y : vec.y, vec.z < 0 ? -vec.z : vec.z);
+}
+
+transpile float4 f4MulPerElem(float4 vec0, float4 vec1)
+{
+    return float4((vec0.x * vec1.x), (vec0.y * vec1.y), (vec0.z * vec1.z), (vec0.w * vec1.w));
+}
+
+transpile float4 f4DivPerElem(float4 vec0, float4 vec1)
+{
+    return float4((vec0.x / vec1.x), (vec0.y / vec1.y), (vec0.z / vec1.z), (vec0.w / vec1.w));
+}
+
+transpile float4 f4RecipPerElem(float4 vec) { return float4((1.0 / vec.x), (1.0 / vec.y), (1.0 / vec.z), (1.0 / vec.w)); }
+
+transpile float4 f4SqrtPerElem(float4 vec) { return float4(sqrt(vec.x), sqrt(vec.y), sqrt(vec.z), sqrt(vec.w)); }
+
+transpile float4 f4RsqrtPerElem(float4 vec)
+{
+    return float4((1.0 / sqrt(vec.x)), (1.0 / sqrt(vec.y)), (1.0 / sqrt(vec.z)), (1.0 / sqrt(vec.w)));
+}
+
+transpile float4 f4FabsfPerElem(float4 vec) { return float4(fabsf(vec.x), fabsf(vec.y), fabsf(vec.z), fabsf(vec.w)); }
+
+transpile float4 f4CopySignPerElem(float4 vec0, float4 vec1)
+{
+    return float4((vec1.x < 0.0) ? -fabsf(vec0.x) : fabsf(vec0.x), (vec1.y < 0.0) ? -fabsf(vec0.y) : fabsf(vec0.y),
+                  (vec1.z < 0.0) ? -fabsf(vec0.z) : fabsf(vec0.z), (vec1.w < 0.0) ? -fabsf(vec0.w) : fabsf(vec0.w));
+}
+
+transpile float4 f4MaxPerElem(float4 vec0, float4 vec1)
+{
+    return float4((vec0.x > vec1.x) ? vec0.x : vec1.x, (vec0.y > vec1.y) ? vec0.y : vec1.y, (vec0.z > vec1.z) ? vec0.z : vec1.z,
+                  (vec0.w > vec1.w) ? vec0.w : vec1.w);
+}
+
+transpile float f4MaxElem(float4 vec)
+{
+    float result;
+    result = (vec.x > vec.y) ? vec.x : vec.y;
+    result = (vec.z > result) ? vec.z : result;
+    result = (vec.w > result) ? vec.w : result;
+    return result;
+}
+
+transpile float4 f4MinPerElem(float4 vec0, float4 vec1)
+{
+    return float4((vec0.x < vec1.x) ? vec0.x : vec1.x, (vec0.y < vec1.y) ? vec0.y : vec1.y, (vec0.z < vec1.z) ? vec0.z : vec1.z,
+                  (vec0.w < vec1.w) ? vec0.w : vec1.w);
+}
+
+transpile float f4MinElem(float4 vec)
+{
+    float result;
+    result = (vec.x < vec.y) ? vec.x : vec.y;
+    result = (vec.z < result) ? vec.z : result;
+    result = (vec.w < result) ? vec.w : result;
+    return result;
+}
+
+transpile float f4Sum(float4 vec)
+{
+    float result;
+    result = vec.x + vec.y;
+    result = result + vec.z;
+    result = result + vec.w;
+    return result;
+}
+
+transpile float4 f4AbsPerElem(float4 vec)
+{
+    return float4((vec.x < 0 ? -vec.x : vec.x), (vec.y < 0 ? -vec.y : vec.y), (vec.z < 0 ? -vec.z : vec.z), (vec.w < 0 ? -vec.w : vec.w));
+}
+
+transpile int i2LengthSqr(int2 a) { return a.x * a.x + a.y * a.y; }
+transpile int i3LengthSqr(int3 a) { return a.x * a.x + a.y * a.y + a.z * a.z; }
+transpile int i4LengthSqr(int4 a) { return a.x * a.x + a.y * a.y + a.z * a.z + a.w * a.w; }
+
+transpile int i2Length(int2 a) { return int(sqrt(float(i2LengthSqr(a)))); }
+transpile int i3Length(int3 a) { return int(sqrt(float(i3LengthSqr(a)))); }
+transpile int i4Length(int4 a) { return int(sqrt(float(i4LengthSqr(a)))); }
+
+transpile int4 cmpEq(float4 a, float4 b) { return int4(-int(a.x == b.x), -int(a.y == b.y), -int(a.z == b.z), -int(a.w == b.w)); }
+
+transpile int4 cmpNotEq(float4 a, float4 b) { return int4(-int(a.x != b.x), -int(a.y != b.y), -int(a.z != b.z), -int(a.w != b.w)); }
+
+transpile int4 cmpLt(float4 a, float4 b) { return int4(-int(a.x < b.x), -int(a.y < b.y), -int(a.z < b.z), -int(a.w < b.w)); }
+
+transpile int4 cmpLe(float4 a, float4 b) { return int4(-int(a.x <= b.x), -int(a.y <= b.y), -int(a.z <= b.z), -int(a.w <= b.w)); }
+
+transpile int4 cmpGt(float4 a, float4 b) { return int4(-int(a.x > b.x), -int(a.y > b.y), -int(a.z > b.z), -int(a.w > b.w)); }
+
+transpile int4 cmpGe(float4 a, float4 b) { return int4(-int(a.x >= b.x), -int(a.y >= b.y), -int(a.z >= b.z), -int(a.w >= b.w)); }
+
+transpile int4 And(int4 _a, int4 _b) { return int4(_a.x & _b.x, _a.y & _b.y, _a.z & _b.z, _a.w & _b.w); }
+transpile int4 Or(int4 _a, int4 _b)
+{
+    int4 ret = int4(_a.x | _b.x, _a.y | _b.y, _a.z | _b.z, _a.w | _b.w);
+    return ret;
+}
+transpile int4 Xor(int4 a, int4 b) { return int4(a.x ^ b.x, a.y ^ b.y, a.z ^ b.z, a.w ^ b.w); }
+transpile int4 Not(int4 v) { return int4(~v.x, ~v.y, ~v.z, ~v.w); }
+transpile int4 ShiftL(int4 v, int bits) { return int4(v.x << bits, v.y << bits, v.z << bits, v.w << bits); }
+transpile int4 ShiftR(int4 v, int bits) { return int4(v.x >> bits, v.y >> bits, v.z >> bits, v.w >> bits); }
+
+transpile int4 i4AbsPerElem(int4 vec)
+{
+    return int4(vec.x < 0 ? -vec.x : vec.x, vec.y < 0 ? -vec.y : vec.y, vec.z < 0 ? -vec.z : vec.z, vec.w < 0 ? -vec.w : vec.w);
+}
+
+transpile uint u2LengthSqr(uint2 a) { return a.x * a.x + a.y * a.y; }
+transpile uint u3LengthSqr(uint3 a) { return a.x * a.x + a.y * a.y + a.z * a.z; }
+transpile uint u4LengthSqr(uint4 a) { return a.x * a.x + a.y * a.y + a.z * a.z + a.w * a.w; }
+
+transpile uint u2Length(uint2 a) { return uint(sqrt(float(u2LengthSqr(a)))); }
+transpile uint u3Length(uint3 a) { return uint(sqrt(float(u3LengthSqr(a)))); }
+transpile uint u4Length(uint4 a) { return uint(sqrt(float(u4LengthSqr(a)))); }
+
+transpile double d2LengthSqr(double2 a) { return a.x * a.x + a.y * a.y; }
+transpile double d3LengthSqr(double3 a) { return a.x * a.x + a.y * a.y + a.z * a.z; }
+transpile double d4LengthSqr(double4 a) { return a.x * a.x + a.y * a.y + a.z * a.z + a.w * a.w; }
+
+transpile double d2Length(double2 a) { return sqrt(d2LengthSqr(a)); }
+transpile double d3Length(double3 a) { return sqrt(d3LengthSqr(a)); }
+transpile double d4Length(double4 a) { return sqrt(d4LengthSqr(a)); }
+
+transpile double2 d2Normalize(double2 a)
+{
+    double lenSqr = d2LengthSqr(a);
+    if (lenSqr > 0.0)
+    {
+        double lenInv = 1.0 / sqrt(lenSqr);
+        return double2(a.x * lenInv, a.y * lenInv);
+    }
+    return double2(0.0, 0.0);
+}
+
+transpile double3 d3Normalize(double3 a)
+{
+    double lenSqr = d3LengthSqr(a);
+    if (lenSqr > 0.0)
+    {
+        double lenInv = 1.0 / sqrt(lenSqr);
+        return double3(a.x * lenInv, a.y * lenInv, a.z * lenInv);
+    }
+    return double3(0.0, 0.0, 0.0);
+}
+
+transpile double4 d4Normalize(double4 a)
+{
+    double lenSqr = d4LengthSqr(a);
+    if (lenSqr > 0.0)
+    {
+        double lenInv = 1.0 / sqrt(lenSqr);
+        return double4(a.x * lenInv, a.y * lenInv, a.z * lenInv, a.w * lenInv);
+    }
+    return double4(0.0, 0.0, 0.0, 0.0);
+}
+
+transpile double d2Dot(double2 a, double2 b) { return a.x * b.x + a.y * b.y; }
+transpile double d3Dot(double3 a, double3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+transpile double d4Dot(double4 a, double4 b) { return a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w; }
+
+transpile double dLerp(double a, double b, double t) { return a + (b - a) * t; }
+
+transpile double2 d2Lerp(double2 a, double2 b, double t) { return d2Add(a, d2MulScalar(d2Sub(b, a), t)); }
+transpile double3 d3Lerp(double3 a, double3 b, double t) { return d3Add(a, d3MulScalar(d3Sub(b, a), t)); }
+transpile double4 d4Lerp(double4 a, double4 b, double t) { return d4Add(a, d4MulScalar(d4Sub(b, a), t)); }
+
+transpile double3 d3Cross(double3 a, double3 b)
+{
+    return double3(((a.y * b.z) - (a.z * b.y)), ((a.z * b.x) - (a.x * b.z)), ((a.x * b.y) - (a.y * b.x)));
+}
+transpile bool d3IsNormalizedEst(double3 v)
+{
+    double len = d3Length(v);
+    return len >= (1 - 0.000001) && len <= (1 + 0.000001);
+}
+
+transpile d2x2 d2x2Identity()
+{
+    d2x2 m;
+    m[0][0] = 1;
+    m[1][1] = 1;
+
+    m[0][1] = 0;
+    m[1][0] = 0;
+
+    return m;
+}
+transpile d3x3 d3x3Identity()
+{
+    d3x3 m;
+    m[0][0] = 1;
+    m[1][1] = 1;
+    m[2][2] = 1;
+
+    m[0][1] = 0;
+    m[0][2] = 0;
+
+    m[1][0] = 0;
+    m[1][2] = 0;
+
+    m[2][0] = 0;
+    m[2][1] = 0;
+
+    return m;
+}
+transpile d4x4 d4x4Identity()
+{
+    d4x4 m;
+    m[0][0] = 1;
+    m[1][1] = 1;
+    m[2][2] = 1;
+    m[3][3] = 1;
+
+    m[0][1] = 0;
+    m[0][2] = 0;
+    m[0][3] = 0;
+
+    m[1][0] = 0;
+    m[1][2] = 0;
+    m[1][3] = 0;
+
+    m[2][0] = 0;
+    m[2][1] = 0;
+    m[2][3] = 0;
+
+    m[3][0] = 0;
+    m[3][1] = 0;
+    m[3][2] = 0;
+
+    return m;
+}
+
+transpile d2x2 d2x2InitRows(double E00, double E10, double E01, double E11)
+{
+    d2x2 m;
+
+    m[0][0] = E00;
+    m[1][0] = E10;
+
+    m[0][1] = E01;
+    m[1][1] = E11;
+
+    return m;
+}
+transpile d3x3 d3x3InitRows(double E00, double E10, double E20, double E01, double E11, double E21, double E02, double E12, double E22)
+{
+    d3x3 m;
+
+    m[0][0] = E00;
+    m[1][0] = E10;
+    m[2][0] = E20;
+    m[0][1] = E01;
+    m[1][1] = E11;
+    m[2][1] = E21;
+    m[0][2] = E02;
+    m[1][2] = E12;
+    m[2][2] = E22;
+
+    return m;
+}
+transpile d4x4 d4x4InitRows(double E00, double E10, double E20, double E30, double E01, double E11, double E21, double E31, double E02,
+                            double E12, double E22, double E32, double E03, double E13, double E23, double E33)
+{
+    d4x4 m;
+
+    m[0][0] = E00;
+    m[1][0] = E10;
+    m[2][0] = E20;
+    m[3][0] = E30;
+    m[0][1] = E01;
+    m[1][1] = E11;
+    m[2][1] = E21;
+    m[3][1] = E31;
+    m[0][2] = E02;
+    m[1][2] = E12;
+    m[2][2] = E22;
+    m[3][2] = E32;
+    m[0][3] = E03;
+    m[1][3] = E13;
+    m[2][3] = E23;
+    m[3][3] = E33;
+
+    return m;
+}
+
+transpile double d2x2Determinant(d2x2 m) { return m[0][0] * m[1][1] - m[1][0] * m[0][1]; }
+
+transpile double d3x3Determinant(d3x3 m)
+{
+    return m[0][0] * (m[1][1] * m[2][2] - m[2][1] * m[1][2]) - m[1][0] * (m[0][1] * m[2][2] - m[2][1] * m[0][2]) +
+           m[2][0] * (m[0][1] * m[1][2] - m[1][1] * m[0][2]);
+}
+
+transpile double d4x4Determinant(d4x4 m)
+{
+    double det;
+
+    d3x3 mSub;
+
+    // first cofactor
+    mSub[0] = double3(m[1][1], m[1][2], m[1][3]);
+    mSub[1] = double3(m[2][1], m[2][2], m[2][3]);
+    mSub[2] = double3(m[3][1], m[3][2], m[3][3]);
+    det = m[0][0] * d3x3Determinant(mSub);
+
+    // second cofactor
+    mSub[0] = double3(m[0][1], m[0][2], m[0][3]);
+    mSub[1] = double3(m[2][1], m[2][2], m[2][3]);
+    mSub[2] = double3(m[3][1], m[3][2], m[3][3]);
+    det -= m[1][0] * d3x3Determinant(mSub);
+
+    // third cofactor
+    mSub[0] = double3(m[0][1], m[0][2], m[0][3]);
+    mSub[1] = double3(m[1][1], m[1][2], m[1][3]);
+    mSub[2] = double3(m[3][1], m[3][2], m[3][3]);
+    det += m[2][0] * d3x3Determinant(mSub);
+
+    // fourth cofactor
+    mSub[0] = double3(m[0][1], m[0][2], m[0][3]);
+    mSub[1] = double3(m[1][1], m[1][2], m[1][3]);
+    mSub[2] = double3(m[2][1], m[2][2], m[2][3]);
+    det -= m[3][0] * d3x3Determinant(mSub);
+
+    return det;
+}
+
+transpile d2x2 d2x2Transpose(d2x2 m)
+{
+    d2x2 t;
+    t[0][0] = m[0][0];
+    t[1][1] = m[1][1];
+
+    t[0][1] = m[1][0];
+
+    t[1][0] = m[0][1];
+
+    return t;
+}
+
+transpile d3x3 d3x3Transpose(d3x3 m)
+{
+    d3x3 t;
+    t[0][0] = m[0][0];
+    t[1][1] = m[1][1];
+    t[2][2] = m[2][2];
+
+    t[0][1] = m[1][0];
+    t[0][2] = m[2][0];
+
+    t[1][0] = m[0][1];
+    t[1][2] = m[2][1];
+
+    t[2][0] = m[0][2];
+    t[2][1] = m[1][2];
+
+    return t;
+}
+transpile d4x4 d4x4Transpose(d4x4 m)
+{
+    d4x4 t;
+    t[0][0] = m[0][0];
+    t[1][1] = m[1][1];
+    t[2][2] = m[2][2];
+    t[3][3] = m[3][3];
+
+    t[0][1] = m[1][0];
+    t[0][2] = m[2][0];
+    t[0][3] = m[3][0];
+
+    t[1][0] = m[0][1];
+    t[1][2] = m[2][1];
+    t[1][3] = m[3][1];
+
+    t[2][0] = m[0][2];
+    t[2][1] = m[1][2];
+    t[2][3] = m[3][2];
+
+    t[3][0] = m[0][3];
+    t[3][1] = m[1][3];
+    t[3][2] = m[2][3];
+
+    return t;
+}
+
+transpile d2x2 d2x2Mul(d2x2 a, d2x2 b)
+{
+    d2x2 at = d2x2Transpose(a);
+
+    d2x2 c;
+
+    c[0][0] = d2Dot(at[0], b[0]);
+    c[0][1] = d2Dot(at[1], b[0]);
+    c[1][0] = d2Dot(at[0], b[1]);
+    c[1][1] = d2Dot(at[1], b[1]);
+
+    return c;
+}
+transpile d3x3 d3x3Mul(d3x3 a, d3x3 b)
+{
+    d3x3 at = d3x3Transpose(a);
+
+    d3x3 c;
+
+    c[0][0] = d3Dot(at[0], b[0]);
+    c[0][1] = d3Dot(at[1], b[0]);
+    c[0][2] = d3Dot(at[2], b[0]);
+
+    c[1][0] = d3Dot(at[0], b[1]);
+    c[1][1] = d3Dot(at[1], b[1]);
+    c[1][2] = d3Dot(at[2], b[1]);
+
+    c[2][0] = d3Dot(at[0], b[2]);
+    c[2][1] = d3Dot(at[1], b[2]);
+    c[2][2] = d3Dot(at[2], b[2]);
+
+    return c;
+}
+transpile d4x4 d4x4Mul(d4x4 a, d4x4 b)
+{
+    d4x4 at = d4x4Transpose(a);
+
+    d4x4 c;
+
+    c[0][0] = d4Dot(at[0], b[0]);
+    c[0][1] = d4Dot(at[1], b[0]);
+    c[0][2] = d4Dot(at[2], b[0]);
+    c[0][3] = d4Dot(at[3], b[0]);
+
+    c[1][0] = d4Dot(at[0], b[1]);
+    c[1][1] = d4Dot(at[1], b[1]);
+    c[1][2] = d4Dot(at[2], b[1]);
+    c[1][3] = d4Dot(at[3], b[1]);
+
+    c[2][0] = d4Dot(at[0], b[2]);
+    c[2][1] = d4Dot(at[1], b[2]);
+    c[2][2] = d4Dot(at[2], b[2]);
+    c[2][3] = d4Dot(at[3], b[2]);
+
+    c[3][0] = d4Dot(at[0], b[3]);
+    c[3][1] = d4Dot(at[1], b[3]);
+    c[3][2] = d4Dot(at[2], b[3]);
+    c[3][3] = d4Dot(at[3], b[3]);
+
+    return c;
+}
+
+transpile double2 d2x2Muld2(d2x2 m, double2 v)
+{
+    double2 result;
+    result[0] = d2Dot(double2(m[0][0], m[1][0]), v);
+    result[1] = d2Dot(double2(m[0][1], m[1][1]), v);
+
+    return result;
+}
+transpile d2x2    d2x2MulScalar(d2x2 m, double s) { return d2x2InitRows(m[0][0] * s, m[1][0] * s, m[0][1] * s, m[1][1] * s); }
+transpile double2 d2Muld2x2(double2 v, d2x2 m)
+{
+    double2 result;
+    result[0] = d2Dot(v, m[0]);
+    result[1] = d2Dot(v, m[1]);
+
+    return result;
+}
+transpile double3 d3x3Muld3(d3x3 a, double3 v)
+{
+    double3 result;
+    result[0] = d3Dot(double3(a[0][0], a[1][0], a[2][0]), v);
+    result[1] = d3Dot(double3(a[0][1], a[1][1], a[2][1]), v);
+    result[2] = d3Dot(double3(a[0][2], a[1][2], a[2][2]), v);
+
+    return result;
+}
+transpile double3 d3Muld3x3(double3 v, d3x3 m)
+{
+    double3 result;
+    result[0] = d3Dot(v, m[0]);
+    result[1] = d3Dot(v, m[1]);
+    result[2] = d3Dot(v, m[2]);
+
+    return result;
+}
+transpile d3x3 d3x3MulScalar(d3x3 m, double s)
+{
+    return d3x3InitRows(m[0][0] * s, m[1][0] * s, m[2][0] * s, m[0][1] * s, m[1][1] * s, m[2][1] * s, m[0][2] * s, m[1][2] * s,
+                        m[2][2] * s);
+}
+transpile double4 d4x4Muld4(d4x4 a, double4 v)
+{
+    double4 result;
+    result[0] = d4Dot(double4(a[0][0], a[1][0], a[2][0], a[3][0]), v);
+    result[1] = d4Dot(double4(a[0][1], a[1][1], a[2][1], a[3][1]), v);
+    result[2] = d4Dot(double4(a[0][2], a[1][2], a[2][2], a[3][2]), v);
+    result[3] = d4Dot(double4(a[0][3], a[1][3], a[2][3], a[3][3]), v);
+
+    return result;
+}
+transpile double4 d4Muld4x4(double4 v, d4x4 m)
+{
+    double4 result;
+    result[0] = d4Dot(v, m[0]);
+    result[1] = d4Dot(v, m[1]);
+    result[2] = d4Dot(v, m[2]);
+    result[3] = d4Dot(v, m[3]);
+
+    return result;
+}
+transpile d4x4 d4x4MulScalar(d4x4 m, double s)
+{
+    return d4x4InitRows(m[0][0] * s, m[1][0] * s, m[2][0] * s, m[3][0] * s, m[0][1] * s, m[1][1] * s, m[2][1] * s, m[3][1] * s, m[0][2] * s,
+                        m[1][2] * s, m[2][2] * s, m[3][2] * s, m[0][3] * s, m[1][3] * s, m[2][3] * s, m[3][3] * s);
+}
+
+transpile d2x2 d2x2Inverse(d2x2 m)
+{
+    double a = m[0].x;
+    double b = m[0].y;
+    double c = m[1].x;
+    double d = m[1].y;
+
+    double det = a * d - b * c;
+    double invDet = 1.0 / det;
+
+    d2x2 inv;
+    inv[0] = double2(d * invDet, -b * invDet);
+    inv[1] = double2(-c * invDet, a * invDet);
+    return inv;
+}
+
+transpile d3x3 d3x3Inverse(d3x3 m)
+{
+    double3 tmp0 = d3Cross(m[1], m[2]);
+    double3 tmp1 = d3Cross(m[2], m[0]);
+    double3 tmp2 = d3Cross(m[0], m[1]);
+    double  detInv = (1.0 / d3Dot(m[2], tmp2));
+
+    d3x3 result;
+    result[0] = double3((tmp0.x * detInv), (tmp1.x * detInv), (tmp2.x * detInv));
+    result[1] = double3((tmp0.y * detInv), (tmp1.y * detInv), (tmp2.y * detInv));
+    result[2] = double3((tmp0.z * detInv), (tmp1.z * detInv), (tmp2.z * detInv));
+
+    return result;
+}
+
+transpile d4x4 d4x4Inverse(d4x4 m)
+{
+    double tmp0 = ((m[2].z * m[0].w) - (m[0].z * m[2].w));
+    double tmp1 = ((m[3].z * m[1].w) - (m[1].z * m[3].w));
+    double tmp2 = ((m[0].y * m[2].z) - (m[2].y * m[0].z));
+    double tmp3 = ((m[1].x * m[3].z) - (m[3].y * m[1].z));
+    double tmp4 = ((m[2].y * m[0].w) - (m[0].y * m[2].w));
+    double tmp5 = ((m[3].y * m[1].w) - (m[1].x * m[3].w));
+
+    double4 res0 = double4(m[2].y * tmp1 - m[2].w * tmp3 - m[2].z * tmp5, m[3].y * tmp0 - m[3].w * tmp2 - m[3].z * tmp4,
+                           m[0].w * tmp3 + m[0].z * tmp5 - m[0].y * tmp1, m[1].w * tmp2 + m[1].z * tmp4 - m[1].x * tmp0);
+    double4 res1 = double4(m[2].x * tmp1, m[3].x * tmp0, m[0].x * tmp1, m[1].x * tmp0);
+    double4 res2 = double4(m[2].x * tmp5, m[3].x * tmp4, m[0].x * tmp5, m[1].x * tmp4);
+    double4 res3 = double4(m[2].x * tmp3, m[3].x * tmp2, m[0].x * tmp3, m[1].x * tmp2);
+
+    double detInv = (1.0 / ((((m[0].x * res0.x) + (m[1].x * res0.y)) + (m[2].x * res0.z)) + (m[3].x * res0.w)));
+
+    tmp0 = ((m[2].x * m[0].y) - (m[0].x * m[2].y));
+    tmp1 = ((m[3].x * m[1].x) - (m[1].x * m[3].y));
+    tmp2 = ((m[2].x * m[0].w) - (m[0].x * m[2].w));
+    tmp3 = ((m[3].x * m[1].w) - (m[1].x * m[3].w));
+    tmp4 = ((m[2].x * m[0].z) - (m[0].x * m[2].z));
+    tmp5 = ((m[3].x * m[1].z) - (m[1].x * m[3].z));
+
+    res2.x = m[2].w * tmp1 - m[2].y * tmp3 + res2.x;
+    res2.y = m[3].w * tmp0 - m[3].y * tmp2 + res2.y;
+    res2.z = m[0].y * tmp3 - m[0].w * tmp1 - res2.z;
+    res2.w = m[1].x * tmp2 - m[1].w * tmp0 - res2.w;
+    res3.x = m[2].y * tmp5 - m[2].z * tmp1 + res3.x;
+    res3.y = m[3].y * tmp4 - m[3].z * tmp0 + res3.y;
+    res3.z = m[0].z * tmp1 - m[0].y * tmp5 - res3.z;
+    res3.w = m[1].z * tmp0 - m[1].x * tmp4 - res3.w;
+    res1.x = m[2].z * tmp3 - m[2].w * tmp5 - res1.x;
+    res1.y = m[3].z * tmp2 - m[3].w * tmp4 - res1.y;
+    res1.z = m[0].w * tmp5 - m[0].z * tmp3 + res1.z;
+    res1.w = m[1].w * tmp4 - m[1].z * tmp2 + res1.w;
+
+    d4x4 inv;
+    inv[0] = d4MulScalar(res0, detInv);
+    inv[1] = d4MulScalar(res1, detInv);
+    inv[2] = d4MulScalar(res2, detInv);
+    inv[3] = d4MulScalar(res3, detInv);
+
+    return inv;
+}
+
+transpile f4x4 f4x4PerspectiveLH(float fovRadians, float aspectInverse, float zNear, float zFar)
+{
+    float f = tan((PI / 2.0) - (0.5 * fovRadians));
+
+    float rangeInv = (1.0 / (zFar - zNear));
+
+    f4x4 p;
+    p[0] = float4(f, 0.0, 0.0, 0.0);
+    p[1] = float4(0.0, (f / aspectInverse), 0.0, 0.0);
+    p[2] = float4(0.0, 0.0, (zFar * rangeInv), 1.0);
+    p[3] = float4(0.0, 0.0, (-(zNear * zFar) * rangeInv), 0.0);
+
+    return p;
+}
+
+transpile f4x4 f4x4PerspectiveRH(float fovRadians, float aspectInverse, float zNear, float zFar)
+{
+    f4x4   p = f4x4PerspectiveLH(fovRadians, aspectInverse, zNear, zFar);
+    float4 col2 = p[2];
+    p[2] = -col2;
+    return p;
+}
+
+transpile f4x4 f4x4PerspectiveLH_ReverseZ(float fovRadians, float aspectInverse, float zNear, float zFar)
+{
+    f4x4 p = f4x4PerspectiveLH(fovRadians, aspectInverse, zNear, zFar);
+
+    p[2].z = p[2].w - p[2].z;
+    p[3].z = -(p[3].z);
+
+    return p;
+}
+
+transpile f4x4 f4x4PerspectiveLH_AsymmetricFov(float leftDegrees, float rightDegrees, float upDegrees, float downDegrees, float zNear,
+                                               float zFar, bool isDegrees)
+{
+    float leftTan = isDegrees ? tan(leftDegrees * (PI / 180.0)) : tan(leftDegrees);
+    float rightTan = isDegrees ? tan(rightDegrees * (PI / 180.0)) : tan(rightDegrees);
+    float upTan = isDegrees ? tan(upDegrees * (PI / 180.0)) : tan(upDegrees);
+    float downTan = isDegrees ? tan(downDegrees * (PI / 180.0)) : tan(downDegrees);
+
+    float projXScale = 2.0 / (leftTan + rightTan);
+    float projXOffset = (leftTan - rightTan) * projXScale * 0.5;
+
+    float projYScale = 2.0 / (upTan + downTan);
+    float projYOffset = (upTan - downTan) * projYScale * 0.5;
+
+    float rangeInv = 1.0 / (zFar - zNear);
+
+    f4x4 result;
+    result[0] = float4(projXScale, 0.0, 0.0, 0.0);
+    result[1] = float4(0.0, projYScale, 0.0, 0.0);
+    result[2] = float4(projXOffset, -projYOffset, zFar * rangeInv, 1.0);
+    result[3] = float4(0.0, 0.0, -zNear * zFar * rangeInv, 0.0);
+
+    return result;
+}
+
+transpile f4x4 f4x4PerspectiveLH_ReverseZ_AsymmetricFov(float leftDegrees, float rightDegrees, float upDegrees, float downDegrees,
+                                                        float zNear, float zFar, bool isDegrees)
+{
+    f4x4 perspMatrix = f4x4PerspectiveLH_AsymmetricFov(leftDegrees, rightDegrees, upDegrees, downDegrees, zNear, zFar, isDegrees);
+
+    float4 col2 = perspMatrix[2];
+    float4 col3 = perspMatrix[3];
+
+    perspMatrix[2].z = col2.w - col2.z;
+    perspMatrix[3].z = -col3.z;
+
+    return perspMatrix;
+}
+
+transpile f4x4 f4x4OrthographicLH(float left, float right, float bottom, float top, float zNear, float zFar)
+{
+    // clang-format off
+    return f4x4InitRows(2.0 / (right - left), 0,                     0,                     -(right + left) / (right - left), 
+                        0,                     2.0 / (top - bottom), 0,                     -(top + bottom) / (top - bottom), 
+                        0,                     0,                     1.0 / (zFar - zNear), -zNear / (zFar - zNear), 
+                        0,                     0,                     0,                     1
+    );
+    // clang-format on
+}
+
+transpile f4x4 f4x4OrthographicRH(float left, float right, float bottom, float top, float zNear, float zFar)
+{
+    f4x4   m = f4x4OrthographicLH(left, right, bottom, top, zNear, zFar);
+    float4 col2 = m[2];
+    m[2] = -col2;
+    return m;
+}
+
+transpile f4x4 f4x4OrthographicLH_ReverseZ(float left, float right, float bottom, float top, float zNear, float zFar)
+{
+    f4x4 m = f4x4OrthographicLH(left, right, bottom, top, zNear, zFar);
+
+    m[2].z = -(m[2].z);
+    m[3].z = -(m[3].z) * zFar / zNear;
+
+    return m;
+}
+
+transpile f4x3 f4x3OrthoInverse(f4x3 m)
+{
+    f4x3 affineInv;
+    affineInv[0] = float3(m[0].x, m[1].x, m[2].x);
+    affineInv[1] = float3(m[0].y, m[1].y, m[2].y);
+    affineInv[2] = float3(m[0].z, m[1].z, m[2].z);
+
+    float3 a = f3MulScalar(affineInv[0], m[3].x);
+    float3 b = f3MulScalar(affineInv[1], m[3].y);
+    float3 c = f3MulScalar(affineInv[2], m[3].z);
+    float3 x = f3Add(a, f3Add(b, c));
+    affineInv[3] = -x;
+    return affineInv;
+}
+
+transpile f4x4 f4x4OrthoInverse(f4x4 m)
+{
+    f4x3 affine;
+    affine[0] = f4GetXYZ(m[0]);
+    affine[1] = f4GetXYZ(m[1]);
+    affine[2] = f4GetXYZ(m[2]);
+    affine[3] = f4GetXYZ(m[3]);
+
+    f4x3 affineInv = f4x3OrthoInverse(affine);
+
+    float3 c0 = affineInv[0];
+    float3 c1 = affineInv[1];
+    float3 c2 = affineInv[2];
+    float3 c3 = affineInv[3];
+
+    m[0] = float4(c0.x, c0.y, c0.z, 0.0);
+    m[1] = float4(c1.x, c1.y, c1.z, 0.0);
+    m[2] = float4(c2.x, c2.y, c2.z, 0.0);
+    m[3] = float4(c3.x, c3.y, c3.z, 1.0);
+
+    return m;
+}
+
+transpile f4x4 f4x4CubeProjectionLH(float zNear, float zFar)
+{
+    // clang-format off
+    return f4x4InitRows(1, 0, 0,                     0, 
+                        0, 1, 0,                     0, 
+                        0, 0, zFar / (zFar - zNear), (zFar * zNear) / (zNear - zFar), 
+                        0, 0, 1,                     0
+    );
+    // clang-format on
+}
+transpile f4x4 f4x4CubeProjectionRH(float zNear, float zFar)
+{
+    f4x4   m = f4x4CubeProjectionLH(zNear, zFar);
+    float4 col2 = m[2];
+    m[2] = -col2;
+    return m;
+}
+
+transpile f4x4 f4x4CubeView(uint side)
+{
+    // clang-format off
+    // TODO define these on C/FSL level
+    uint _POSITIVE_X = 0;
+    uint _NEGATIVE_X = 1;
+    uint _POSITIVE_Y = 2;
+    uint _NEGATIVE_Y = 3;
+    uint _POSITIVE_Z = 4;
+    //uint _NEGATIVE_Z = 5;
+    
+    if (side == _POSITIVE_X)
+        return f4x4InitRows( 0,  0, -1,  0, 
+                             0,  1,  0,  0, 
+                             1,  0,  0,  0, 
+                             0,  0,  0,  1
+        );
+    if (side == _NEGATIVE_X)
+        return f4x4InitRows( 0,  0,  1,  0, 
+                             0,  1,  0,  0, 
+                            -1,  0,  0,  0, 
+                             0,  0,  0,  1
+        );
+    if (side == _POSITIVE_Y)
+        return f4x4InitRows( 1,  0,  0,  0, 
+                             0,  0, -1,  0, 
+                             0,  1,  0,  0, 
+                             0,  0,  0,  1
+        );
+    if (side == _NEGATIVE_Y)
+        return f4x4InitRows( 1,  0,  0,  0, 
+                             0,  0,  1,  0, 
+                             0, -1,  0,  0, 
+                             0,  0,  0,  1
+        );
+    if (side == _POSITIVE_Z)
+        return f4x4InitRows( 1,  0,  0,  0, 
+                             0,  1,  0,  0, 
+                             0,  0,  1,  0, 
+                             0,  0,  0,  1
+        );
+    else
+        return f4x4InitRows(-1,  0,  0,  0, 
+                             0,  1,  0,  0, 
+                             0,  0, -1,  0, 
+                             0,  0,  0,  1
+        );
+    // clang-format on
+}
+
+transpile void f4x4ExtractFrustumClipPlanes(f4x4 vp, inout float4 rplane, inout float4 lplane, inout float4 tplane, inout float4 bplane,
+                                            inout float4 fplane, inout float4 nplane, bool normalizePlanes)
+{
+    // Left plane
+    lplane = f4Add(float4(vp[0][3], vp[1][3], vp[2][3], vp[3][3]), float4(vp[0][0], vp[1][0], vp[2][0], vp[3][0]));
+
+    // Right plane
+    rplane = f4Sub(float4(vp[0][3], vp[1][3], vp[2][3], vp[3][3]), float4(vp[0][0], vp[1][0], vp[2][0], vp[3][0]));
+
+    // Bottom plane
+    bplane = f4Add(float4(vp[0][3], vp[1][3], vp[2][3], vp[3][3]), float4(vp[0][1], vp[1][1], vp[2][1], vp[3][1]));
+
+    // Top plane
+    tplane = f4Sub(float4(vp[0][3], vp[1][3], vp[2][3], vp[3][3]), float4(vp[0][1], vp[1][1], vp[2][1], vp[3][1]));
+
+    // Near plane
+    nplane = f4Add(float4(vp[0][3], vp[1][3], vp[2][3], vp[3][3]), float4(vp[0][2], vp[1][2], vp[2][2], vp[3][2]));
+
+    // Far plane
+    fplane = f4Sub(float4(vp[0][3], vp[1][3], vp[2][3], vp[3][3]), float4(vp[0][2], vp[1][2], vp[2][2], vp[3][2]));
+
+    // Normalize if needed
+    if (normalizePlanes)
+    {
+        float lplane_norm = f3Length(lplane.xyz);
+        lplane = f4DivScalar(lplane, lplane_norm);
+
+        float rplane_norm = f3Length(rplane.xyz);
+        rplane = f4DivScalar(rplane, rplane_norm);
+
+        float bplane_norm = f3Length(bplane.xyz);
+        bplane = f4DivScalar(bplane, bplane_norm);
+
+        float tplane_norm = f3Length(tplane.xyz);
+        tplane = f4DivScalar(tplane, tplane_norm);
+
+        float nplane_norm = f3Length(nplane.xyz);
+        nplane = f4DivScalar(nplane, nplane_norm);
+
+        float fplane_norm = f3Length(fplane.xyz);
+        fplane = f4DivScalar(fplane, fplane_norm);
+    }
+}
+
+transpile f3x3 f3x3RotationZYX(float3 radiansXYZ)
+{
+    float sX = sin(radiansXYZ.x);
+    float cX = cos(radiansXYZ.x);
+    float sY = sin(radiansXYZ.y);
+    float cY = cos(radiansXYZ.y);
+    float sZ = sin(radiansXYZ.z);
+    float cZ = cos(radiansXYZ.z);
+    float tmp0 = (cZ * sY);
+    float tmp1 = (sZ * sY);
+    f3x3  r;
+    r[0] = float3((cZ * cY), (sZ * cY), -sY);
+    r[1] = float3(((tmp0 * sX) - (sZ * cX)), ((tmp1 * sX) + (cZ * cX)), (cY * sX));
+    r[2] = float3(((tmp0 * cX) + (sZ * sX)), ((tmp1 * cX) - (cZ * sX)), (cY * cX));
+
+    return r;
+}
+
+transpile f3x3 f3x3RotationQuat(quat q)
+{
+    float qx2 = (q.x + q.x);
+    float qy2 = (q.y + q.y);
+    float qz2 = (q.z + q.z);
+    float qxqx2 = (q.x * qx2);
+    float qxqy2 = (q.x * qy2);
+    float qxqz2 = (q.x * qz2);
+    float qxqw2 = (q.w * qx2);
+    float qyqy2 = (q.y * qy2);
+    float qyqz2 = (q.y * qz2);
+    float qyqw2 = (q.w * qy2);
+    float qzqz2 = (q.z * qz2);
+    float qzqw2 = (q.w * qz2);
+
+    f3x3 r;
+    r[0] = float3(((1.0 - qyqy2) - qzqz2), (qxqy2 + qzqw2), (qxqz2 - qyqw2));
+    r[1] = float3((qxqy2 - qzqw2), ((1.0 - qxqx2) - qzqz2), (qyqz2 + qxqw2));
+    r[2] = float3((qxqz2 + qyqw2), (qyqz2 - qxqw2), ((1.0 - qxqx2) - qyqy2));
+
+    return r;
+}
+
+transpile f4x4 f4x4RotationX(float radians)
+{
+    float s = sin(radians);
+    float c = cos(radians);
+    f4x4  m;
+    m[0] = float4(1, 0, 0, 0);
+    m[1] = float4(0.0, c, s, 0.0);
+    m[2] = float4(0.0, -s, c, 0.0);
+    m[3] = float4(0, 0, 0, 1);
+
+    return m;
+}
+transpile f4x4 f4x4RotationY(float radians)
+{
+    float s = sin(radians);
+    float c = cos(radians);
+    f4x4  m;
+    m[0] = float4(c, 0.0, -s, 0.0);
+    m[1] = float4(0, 1, 0, 0);
+    m[2] = float4(s, 0.0, c, 0.0);
+    m[3] = float4(0, 0, 0, 1);
+
+    return m;
+}
+
+transpile f4x4 f4x4RotationZ(float radians)
+{
+    float s = sin(radians);
+    float c = cos(radians);
+
+    f4x4 m;
+    m[0] = float4(c, s, 0.0, 0.0);
+    m[1] = float4(-s, c, 0.0, 0.0);
+    m[2] = float4(0, 0, 1, 0);
+    m[3] = float4(0, 0, 0, 1);
+
+    return m;
+}
+transpile f4x4 f4x4Rotation(float radians, float3 unitVec)
+{
+    float s = sin(radians);
+    float c = cos(radians);
+    float x = unitVec.x;
+    float y = unitVec.y;
+    float z = unitVec.z;
+    float xy = (x * y);
+    float yz = (y * z);
+    float zx = (z * x);
+    float oneMinusC = (1.0 - c);
+
+    f4x4 m;
+    m[0] = float4((((x * x) * oneMinusC) + c), ((xy * oneMinusC) + (z * s)), ((zx * oneMinusC) - (y * s)), 0.0);
+    m[1] = float4(((xy * oneMinusC) - (z * s)), (((y * y) * oneMinusC) + c), ((yz * oneMinusC) + (x * s)), 0.0);
+    m[2] = float4(((zx * oneMinusC) + (y * s)), ((yz * oneMinusC) - (x * s)), (((z * z) * oneMinusC) + c), 0.0);
+    m[3] = float4(0, 0, 0, 1);
+
+    return m;
+}
+
+// Note that:
+//  rotateYX(-y,-x)*rotateXY(x,y) == mat4::identity()
+// which means that
+//  inverse(rotateXY(x,y)) = rotateYX(-y,-x)
+transpile f4x4 f4x4RotationYX(float radiansY, float radiansX)
+{
+    /*
+    [	1,		 0,		 0,		 0]
+    [	0,		 c,		-s,		 0]
+    [	0,		 s,		 c,		 0]
+    [	0,		 0,		 0,		 1]
+
+    [ o, 0, i, 0]	[   o,		is,		ic,		0]
+    [ 0, 1, 0, 0]	[   0,		c ,		-s,		0]
+    [-i, 0, o, 0]	[  -i,		os,		oc,		0]
+    [ 0, 0, 0, 1]	[   0,		0 ,		0 ,		1]
+    */
+    float cosX = cos(radiansX);
+    float sinX = sin(radiansX);
+    float cosY = cos(radiansY);
+    float sinY = sin(radiansY);
+
+    // clang-format off
+    return f4x4InitRows(
+        cosY,  sinY * sinX, sinY * cosX, 0, 
+        0,     cosX,        -sinX,       0,
+        -sinY, cosY * sinX, cosY * cosX, 0, 
+        0,     0,           0,           1);
+    // clang-format on
+}
+
+transpile f4x4 f4x4RotationXY(float radiansX, float radiansY)
+{
+    // same as: return mat4::rotationX(angleX) * mat4::rotationY(angleY);
+    float cosX = cos(radiansX);
+    float sinX = sin(radiansX);
+    float cosY = cos(radiansY);
+    float sinY = sin(radiansY);
+
+    // clang-format off
+    return f4x4InitRows(
+        cosY,         0,    sinY,         0, 
+        sinX * sinY,  cosX, -sinX * cosY, 0, 
+        cosX * -sinY, sinX, cosX * cosY,  0, 
+        0,            0,    0,            1);
+    // clang-format on
+}
+
+transpile f4x4 f4x4RotationZYX(float3 radiansXYZ)
+{
+    float sX = sin(radiansXYZ.x);
+    float cX = cos(radiansXYZ.x);
+    float sY = sin(radiansXYZ.y);
+    float cY = cos(radiansXYZ.y);
+    float sZ = sin(radiansXYZ.z);
+    float cZ = cos(radiansXYZ.z);
+    float tmp0 = (cZ * sY);
+    float tmp1 = (sZ * sY);
+
+    f4x4 r;
+    r[0] = float4((cZ * cY), (sZ * cY), -sY, 0.0);
+    r[1] = float4(((tmp0 * sX) - (sZ * cX)), ((tmp1 * sX) + (cZ * cX)), (cY * sX), 0.0);
+    r[2] = float4(((tmp0 * cX) + (sZ * sX)), ((tmp1 * cX) - (cZ * sX)), (cY * cX), 0.0);
+    r[3] = float4(0, 0, 0, 1);
+
+    return r;
+}
+
+transpile f4x4 f4x4RotationQuat(quat q)
+{
+    f3x3 r3 = f3x3RotationQuat(q);
+
+    f4x4 r;
+    r[0] = float4(r3[0].x, r3[0].y, r3[0].z, 0.0);
+    r[1] = float4(r3[1].x, r3[1].y, r3[1].z, 0.0);
+    r[2] = float4(r3[2].x, r3[2].y, r3[2].z, 0.0);
+    r[3] = float4(0.0, 0.0, 0.0, 1.0);
+
+    return r;
+}
+
+transpile f4x4 f4x4Scale(float3 scale)
+{
+    f4x4 m;
+    m[0] = float4(scale.x, 0, 0, 0);
+    m[1] = float4(0, scale.y, 0, 0);
+    m[2] = float4(0, 0, scale.z, 0);
+    m[3] = float4(0, 0, 0, 1);
+
+    return m;
+}
+
+transpile f4x4 f4x4AppendScale(f4x4 m, float3 scale)
+{
+    m[0] = f4MulScalar(m[0], scale.x);
+    m[1] = f4MulScalar(m[1], scale.y);
+    m[2] = f4MulScalar(m[2], scale.z);
+
+    return m;
+}
+
+transpile f4x4 f4x4Translation(float3 v)
+{
+    // clang-format off
+    return f4x4InitRows(
+        1,  0,  0, v.x,
+        0,  1,  0, v.y,
+        0,  0,  1, v.z,
+        0,  0,  0, 1.0
+    );
+    // clang-format on
+}
+
+transpile f4x4 f4x4SetTranslation(f4x4 m, float3 t)
+{
+    m[3].x = t.x;
+    m[3].y = t.y;
+    m[3].z = t.z;
+    return m;
+}
+
+transpile f4x4 f4x4PrependScale(float3 scaleVec, f4x4 m)
+{
+    float4 scale4 = float4(scaleVec.x, scaleVec.y, scaleVec.z, 1.0);
+
+    m[0] = f4MulPerElem(m[0], scale4);
+    m[1] = f4MulPerElem(m[1], scale4);
+    m[2] = f4MulPerElem(m[2], scale4);
+    m[3] = f4MulPerElem(m[3], scale4);
+    return m;
+}
+
+transpile f4x4 f4x4LookAtLH(float3 eyePos, float3 lookAtPos, float3 upVec)
+{
+    float3 v3Y = f3Normalize(upVec);
+    float3 v3Z = f3Normalize(f3Sub(lookAtPos, eyePos));
+    float3 v3X = f3Normalize(f3Cross(v3Y, v3Z));
+    v3Y = f3Cross(v3Z, v3X);
+    f4x4 m4EyeFrame;
+    m4EyeFrame[0] = float4(v3X.x, v3X.y, v3X.z, 0.0);
+    m4EyeFrame[1] = float4(v3Y.x, v3Y.y, v3Y.z, 0.0);
+    m4EyeFrame[2] = float4(v3Z.x, v3Z.y, v3Z.z, 0.0);
+    m4EyeFrame[3] = float4(eyePos.x, eyePos.y, eyePos.z, 0.0);
+    return f4x4OrthoInverse(m4EyeFrame);
+}
+
+transpile f4x4 f4x4LookAtRH(float3 eyePos, float3 lookAtPos, float3 upVec)
+{
+    float3 v3Y = f3Normalize(upVec);
+    float3 v3Z = f3Normalize(f3Sub(eyePos, lookAtPos));
+    float3 v3X = f3Normalize(f3Cross(v3Y, v3Z));
+    v3Y = f3Cross(v3Z, v3X);
+    f4x4 m4EyeFrame;
+    m4EyeFrame[0] = float4(v3X.x, v3X.y, v3X.z, 0.0);
+    m4EyeFrame[1] = float4(v3Y.x, v3Y.y, v3Y.z, 0.0);
+    m4EyeFrame[2] = float4(v3Z.x, v3Z.y, v3Z.z, 0.0);
+    m4EyeFrame[3] = float4(eyePos.x, eyePos.y, eyePos.z, 0.0);
+    return f4x4OrthoInverse(m4EyeFrame);
+}
+
+transpile f4x4 f4x4FrustumLH(float left, float right, float bottom, float top, float zNear, float zFar)
+{
+    float sum_rl = (right + left);
+    float sum_tb = (top + bottom);
+    float inv_rl = (1.0 / (right - left));
+    float inv_tb = (1.0 / (top - bottom));
+    float inv_nf = (1.0 / (zNear - zFar));
+    float n2 = (zNear + zNear);
+    f4x4  m;
+    m[0] = float4((n2 * inv_rl), 0.0, 0.0, 0.0);
+    m[1] = float4(0.0, (n2 * inv_tb), 0.0, 0.0);
+    m[2] = float4((sum_rl * inv_rl), (sum_tb * inv_tb), (zFar * inv_nf), -1.0);
+    m[3] = float4(0.0, 0.0, ((zNear * inv_nf) * zFar), 0.0);
+    float4 col2 = m[2];
+    m[2] = -col2;
+    return m;
+}
+
+transpile float3 eulerAngles(f3x3 rotationMatrix)
+{
+    float r11 = rotationMatrix[0].x;
+    float r12 = rotationMatrix[0].y;
+    float r13 = rotationMatrix[0].z;
+    float r23 = rotationMatrix[1].z;
+    float r33 = rotationMatrix[2].z;
+
+    float angleX = atan2(r23, r33);
+    float angleY = atan2(-r13, sqrt(r23 * r23 + r33 * r33));
+    float angleZ = atan2(r12, r11);
+
+    return float3(angleX, angleY, angleZ);
+}
+
+transpile float4 calculateFrustumPlane(f4x4 invMvp, float3 csPlaneNormal, float3 csPlaneTangent, float csPlaneDistance)
+{
+    float3 csPlaneBitangent = f3Normalize(f3Cross(csPlaneTangent, csPlaneNormal));
+    float3 csNormalOffset = f3MulScalar(csPlaneNormal, csPlaneDistance);
+
+    float4 pointA = (f4x4Mulf4(invMvp, f4Fromf3(f3Add(csNormalOffset, csPlaneTangent), 1.0f)));
+    float4 pointB = (f4x4Mulf4(invMvp, f4Fromf3(csNormalOffset, 1.f)));
+    float4 pointC = (f4x4Mulf4(invMvp, f4Fromf3(f3Add(csNormalOffset, csPlaneBitangent), 1.0f)));
+    pointA = f4DivScalar(pointA, pointA.w);
+    pointB = f4DivScalar(pointB, pointB.w);
+    pointC = f4DivScalar(pointC, pointC.w);
+    //
+    float3 dir = f3Normalize(f3Cross(f3Sub(pointB.xyz, pointA.xyz), f3Sub(pointB.xyz, pointC.xyz)));
+    float  distance = f3Dot(dir, pointB.xyz);
+    float4 plane = f4Fromf3(dir, -distance);
+    return plane;
+}
+
+transpile float2 frustumPlaneSizeFovX(float fovX, float aspect, float distance)
+{
+    float2 size;
+
+    size.x = 2.0f * distance * tan(0.5f * fovX);
+    size.y = 1.0f / aspect * size.x;
+
+    return size;
+}
+
+transpile float2 frustumPlaneSizeFovY(float fovY, float aspect, float distance)
+{
+    float2 size;
+
+    size.y = 2.0f * distance * tan(0.5f * fovY);
+    size.x = aspect * size.y;
+
+    return size;
+}
+
+transpile d4x4 d4x4PerspectiveLH(double fovRadians, double aspectInverse, double zNear, double zFar)
+{
+    double f = double(tan(float(((PI / 2.0) - (0.5 * fovRadians)))));
+
+    double rangeInv = (1.0 / (zFar - zNear));
+
+    d4x4 p;
+    p[0] = double4(f, 0.0, 0.0, 0.0);
+    p[1] = double4(0.0, (f / aspectInverse), 0.0, 0.0);
+    p[2] = double4(0.0, 0.0, (zFar * rangeInv), 1.0);
+    p[3] = double4(0.0, 0.0, (-(zNear * zFar) * rangeInv), 0.0);
+
+    return p;
+}
+
+transpile d4x4 d4x4PerspectiveRH(double fovRadians, double aspectInverse, double zNear, double zFar)
+{
+    d4x4    p = d4x4PerspectiveLH(fovRadians, aspectInverse, zNear, zFar);
+    double4 col2 = p[2];
+    p[2] = -col2;
+    return p;
+}
+
+transpile d4x4 d4x4PerspectiveLH_ReverseZ(double fovRadians, double aspectInverse, double zNear, double zFar)
+{
+    d4x4 p = d4x4PerspectiveLH(fovRadians, aspectInverse, zNear, zFar);
+
+    p[2].z = p[2].w - p[2].z;
+    p[3].z = -(p[3].z);
+
+    return p;
+}
+
+transpile d4x4 d4x4OrthographicLH(double left, double right, double bottom, double top, double zNear, double zFar)
+{
+    // clang-format off
+    return d4x4InitRows(2.0 / (right - left), 0,                     0,                     -(right + left) / (right - left), 
+                        0,                     2.0 / (top - bottom), 0,                     -(top + bottom) / (top - bottom), 
+                        0,                     0,                     1.0 / (zFar - zNear), -zNear / (zFar - zNear), 
+                        0,                     0,                     0,                     1
+    );
+    // clang-format on
+}
+
+transpile d4x4 d4x4OrthographicRH(double left, double right, double bottom, double top, double zNear, double zFar)
+{
+    d4x4    m = d4x4OrthographicLH(left, right, bottom, top, zNear, zFar);
+    double4 col2 = m[2];
+    m[2] = -col2;
+    return m;
+}
+
+transpile d4x4 d4x4OrthographicLH_ReverseZ(double left, double right, double bottom, double top, double zNear, double zFar)
+{
+    d4x4 m = d4x4OrthographicLH(left, right, bottom, top, zNear, zFar);
+
+    m[2].z = -(m[2].z);
+    m[3].z = -(m[3].z) * zFar / zNear;
+
+    return m;
+}
+
+transpile d4x4 d4x4CubeProjectionLH(double zNear, double zFar)
+{
+    // clang-format off
+    return d4x4InitRows(1, 0, 0,                     0, 
+                        0, 1, 0,                     0, 
+                        0, 0, zFar / (zFar - zNear), (zFar * zNear) / (zNear - zFar), 
+                        0, 0, 1,                     0
+    );
+    // clang-format on
+}
+transpile d4x4 d4x4CubeProjectionRH(double zNear, double zFar)
+{
+    d4x4    m = d4x4CubeProjectionLH(zNear, zFar);
+    double4 col2 = m[2];
+    m[2] = -col2;
+    return m;
+}
+
+transpile d4x4 d4x4CubeView(uint side)
+{
+    // clang-format off
+    // TODO define these on C/FSL level
+    uint _POSITIVE_X = 0;
+    uint _NEGATIVE_X = 1;
+    uint _POSITIVE_Y = 2;
+    uint _NEGATIVE_Y = 3;
+    uint _POSITIVE_Z = 4;
+    //uint _NEGATIVE_Z = 5;
+    
+    if (side == _POSITIVE_X)
+        return d4x4InitRows( 0,  0, -1,  0, 
+                             0,  1,  0,  0, 
+                             1,  0,  0,  0, 
+                             0,  0,  0,  1
+        );
+    if (side == _NEGATIVE_X)
+        return d4x4InitRows( 0,  0,  1,  0, 
+                             0,  1,  0,  0, 
+                            -1,  0,  0,  0, 
+                             0,  0,  0,  1
+        );
+    if (side == _POSITIVE_Y)
+        return d4x4InitRows( 1,  0,  0,  0, 
+                             0,  0, -1,  0, 
+                             0,  1,  0,  0, 
+                             0,  0,  0,  1
+        );
+    if (side == _NEGATIVE_Y)
+        return d4x4InitRows( 1,  0,  0,  0, 
+                             0,  0,  1,  0, 
+                             0, -1,  0,  0, 
+                             0,  0,  0,  1
+        );
+    if (side == _POSITIVE_Z)
+        return d4x4InitRows( 1,  0,  0,  0, 
+                             0,  1,  0,  0, 
+                             0,  0,  1,  0, 
+                             0,  0,  0,  1
+        );
+    else
+        return d4x4InitRows(-1,  0,  0,  0, 
+                             0,  1,  0,  0, 
+                             0,  0, -1,  0, 
+                             0,  0,  0,  1
+        );
+    // clang-format on
+}
+
+transpile d4x3 d4x3OrthoInverse(d4x3 m)
+{
+    d4x3 affineInv;
+    affineInv[0] = double3(m[0].x, m[1].x, m[2].x);
+    affineInv[1] = double3(m[0].y, m[1].y, m[2].y);
+    affineInv[2] = double3(m[0].z, m[1].z, m[2].z);
+
+    double3 a = d3MulScalar(affineInv[0], m[3].x);
+    double3 b = d3MulScalar(affineInv[1], m[3].y);
+    double3 c = d3MulScalar(affineInv[2], m[3].z);
+    double3 x = d3Add(a, d3Add(b, c));
+    affineInv[3] = -x;
+    return affineInv;
+}
+
+transpile d4x4 d4x4OrthoInverse(d4x4 m)
+{
+    d4x3 affine;
+    affine[0] = d4GetXYZ(m[0]);
+    affine[1] = d4GetXYZ(m[1]);
+    affine[2] = d4GetXYZ(m[2]);
+    affine[3] = d4GetXYZ(m[3]);
+
+    d4x3 affineInv = d4x3OrthoInverse(affine);
+
+    double3 c0 = affineInv[0];
+    double3 c1 = affineInv[1];
+    double3 c2 = affineInv[2];
+    double3 c3 = affineInv[3];
+
+    m[0] = double4(c0.x, c0.y, c0.z, 0.0);
+    m[1] = double4(c1.x, c1.y, c1.z, 0.0);
+    m[2] = double4(c2.x, c2.y, c2.z, 0.0);
+    m[3] = double4(c3.x, c3.y, c3.z, 1.0);
+
+    return m;
+}
+
+transpile d4x4 d4x4LookAtLH(double3 eyePos, double3 lookAtPos, double3 upVec)
+{
+    double3 v3Y = d3Normalize(upVec);
+    double3 v3Z = d3Normalize(d3Sub(lookAtPos, eyePos));
+    double3 v3X = d3Normalize(d3Cross(v3Y, v3Z));
+    v3Y = d3Cross(v3Z, v3X);
+    d4x4 m4EyeFrame;
+    m4EyeFrame[0] = double4(v3X.x, v3X.y, v3X.z, 0.0);
+    m4EyeFrame[1] = double4(v3Y.x, v3Y.y, v3Y.z, 0.0);
+    m4EyeFrame[2] = double4(v3Z.x, v3Z.y, v3Z.z, 0.0);
+    m4EyeFrame[3] = double4(eyePos.x, eyePos.y, eyePos.z, 0.0);
+    return d4x4OrthoInverse(m4EyeFrame);
+}
+
+transpile d4x4 d4x4LookAtRH(double3 eyePos, double3 lookAtPos, double3 upVec)
+{
+    double3 v3Y = d3Normalize(upVec);
+    double3 v3Z = d3Normalize(d3Sub(eyePos, lookAtPos));
+    double3 v3X = d3Normalize(d3Cross(v3Y, v3Z));
+    v3Y = d3Cross(v3Z, v3X);
+    d4x4 m4EyeFrame;
+    m4EyeFrame[0] = double4(v3X.x, v3X.y, v3X.z, 0.0);
+    m4EyeFrame[1] = double4(v3Y.x, v3Y.y, v3Y.z, 0.0);
+    m4EyeFrame[2] = double4(v3Z.x, v3Z.y, v3Z.z, 0.0);
+    m4EyeFrame[3] = double4(eyePos.x, eyePos.y, eyePos.z, 0.0);
+    return d4x4OrthoInverse(m4EyeFrame);
+}
+
+// Calculates the inverse of a reverse z perspective projection matrix
+// This is faster than regular 4x4 matrix inversion since it can be split to two 2x2 submatrix inverses
+transpile f4x4 InverseProjectionMatrixPerspectiveReverseZ(f4x4 proj)
+{
+	f4x4 ret = proj;
+	ret[0][0] = 1.0 / proj[0][0];
+	ret[1][1] = 1.0 / proj[1][1];
+	ret[2][2] = 0.0;
+	ret[2][3] = 1.0 / proj[3][2];
+	ret[3][2] = 1.0f;
+	ret[3][3] = -(proj[3][2]) / proj[2][2];
+	return ret;
+}
+
+transpile quat quatIdentity() { return quat(0, 0, 0, 1); }
+transpile quat quatSlerp(float t, quat uq0, quat uq1)
+{
+    quat  start;
+    float cosAngle = f4Dot(quatTof4(uq0), quatTof4(uq1));
+    float scale0;
+    float scale1;
+    if (cosAngle < 0.0)
+    {
+        cosAngle = -cosAngle;
+        start = (-uq0);
+    }
+    else
+    {
+        start = uq0;
+    }
+    if (cosAngle < 0.999)
+    {
+        float angle = acosf(cosAngle);
+        float recipSinAngle = (1.0 / sin(angle));
+        scale0 = (sin(((1.0 - t) * angle)) * recipSinAngle);
+        scale1 = (sin((t * angle)) * recipSinAngle);
+    }
+    else
+    {
+        scale0 = (1.0 - t);
+        scale1 = t;
+    }
+    return f4ToQuat(f4Add(f4MulScalar(quatTof4(start), scale0), f4MulScalar(quatTof4(uq1), scale1)));
+}
+transpile quat quatSQuad(float t, quat uq0, quat uq1, quat uq2, quat uq3)
+{
+    quat tmp0 = quatSlerp(t, uq0, uq3);
+    quat tmp1 = quatSlerp(t, uq1, uq2);
+    return quatSlerp(((2.0 * t) * (1.0 - t)), tmp0, tmp1);
+}
+
+transpile quat quatRotationVectors(float3 unitVec0, float3 unitVec1)
+{
+    float cosHalfAngleX2 = sqrt((2.0 * (1.0 + f3Dot(unitVec0, unitVec1))));
+    float recipCosHalfAngleX2 = (1.0 / cosHalfAngleX2);
+
+    float3 xyz = f3MulScalar(f3Cross(unitVec0, unitVec1), recipCosHalfAngleX2);
+    return quat(xyz.x, xyz.y, xyz.z, cosHalfAngleX2 * 0.5);
+}
+transpile quat quatRotationRadians(float radians, float3 unitVec)
+{
+    float  angle = (radians * 0.5);
+    float  s = sin(angle);
+    float  c = cos(angle);
+    float3 xyz = f3MulScalar(unitVec, s);
+    return quat(xyz.x, xyz.y, xyz.z, c);
+}
+transpile quat quatRotationX(float radians)
+{
+    float angle = (radians * 0.5);
+    float s = sin(angle);
+    float c = cos(angle);
+    return quat(s, 0.0, 0.0, c);
+}
+transpile quat quatRotationY(float radians)
+{
+    float angle = (radians * 0.5);
+    float s = sin(angle);
+    float c = cos(angle);
+    return quat(0.0, s, 0.0, c);
+}
+transpile quat quatRotationZ(float radians)
+{
+    float angle = (radians * 0.5);
+    float s = sinf(angle);
+    float c = cosf(angle);
+    return quat(0.0, 0.0, s, c);
+}
+transpile quat quatFromVectors(float3 from, float3 to)
+{
+    float tolerance = 0.000001;
+    float norm_from_norm_to = f3Dot(from, from) * f3Dot(to, to);
+    float x = sqrt(norm_from_norm_to);
+    if (x < tolerance)
+        return quat(0, 0, 0, 1);
+
+    quat  q;
+    float imaginary = f3Dot(from, to);
+    float real = x + imaginary;
+    if (real < x * tolerance)
+    {
+        q = fabsf(from[0]) > fabsf(from[2]) ? quat(-from[1], from[0], 0.0, 0.0) : quat(0.0, -from[2], from[1], 0.0);
+    }
+    else
+    {
+        float3 xyz = f3Cross(from, to);
+        q = quat(xyz.x, xyz.y, xyz.z, real);
+    }
+    return f4ToQuat(f4Normalize(quatTof4(q)));
+}
+transpile quat quatFromAxisCosAngle(float3 axis, float c)
+{
+    float  half_cos2 = (1.0 + c) * 0.5;
+    float  half_sin2 = 1.0 - half_cos2;
+    float  halfSin = sqrt(half_sin2);
+    float  halfCos = sqrt(half_cos2);
+    float3 vec = f3MulScalar(axis, halfSin);
+    return quat(vec.x, vec.y, vec.z, halfCos);
+}
+transpile quat quatFromAxisAngle(float3 axis, float angle_radian)
+{
+    float halfAngle = 0.5f * angle_radian;
+    float sinHalf = sin(halfAngle);
+
+    float3 xyz = f3MulScalar(axis.xyz, sinHalf);
+    quat   quaternion = quat(xyz.x, xyz.y, xyz.z, cos(halfAngle));
+
+    return quaternion;
+}
+transpile quat quatFromf3x3(f3x3 m)
+{
+    float xx = m[0].x;
+    float yx = m[0].y;
+    float zx = m[0].z;
+    float xy = m[1].x;
+    float yy = m[1].y;
+    float zy = m[1].z;
+    float xz = m[2].x;
+    float yz = m[2].y;
+    float zz = m[2].z;
+
+    float trace = ((xx + yy) + zz);
+
+    bool negTrace = (trace < 0.0);
+    bool ZgtX = zz > xx;
+    bool ZgtY = zz > yy;
+    bool YgtX = yy > xx;
+    bool largestXorY = (!ZgtX || !ZgtY) && negTrace;
+    bool largestYorZ = (YgtX || ZgtX) && negTrace;
+    bool largestZorX = (ZgtY || !YgtX) && negTrace;
+
+    if (largestXorY)
+    {
+        zz = -zz;
+        xy = -xy;
+    }
+    if (largestYorZ)
+    {
+        xx = -xx;
+        yz = -yz;
+    }
+    if (largestZorX)
+    {
+        yy = -yy;
+        zx = -zx;
+    }
+
+    float radicand = (((xx + yy) + zz) + 1.0);
+    float scale = (0.5f * (1.0 / sqrt(radicand)));
+
+    float tmpx = ((zy - yz) * scale);
+    float tmpy = ((xz - zx) * scale);
+    float tmpz = ((yx - xy) * scale);
+    float tmpw = (radicand * scale);
+    float qx = tmpx;
+    float qy = tmpy;
+    float qz = tmpz;
+    float qw = tmpw;
+
+    if (largestXorY)
+    {
+        qx = tmpw;
+        qy = tmpz;
+        qz = tmpy;
+        qw = tmpx;
+    }
+    if (largestYorZ)
+    {
+        tmpx = qx;
+        tmpz = qz;
+        qx = qy;
+        qy = tmpx;
+        qz = qw;
+        qw = tmpz;
+    }
+
+    return quat(qx, qy, qz, qw);
+}
+transpile float3 quatRotateVector(quat q, float3 v)
+{
+    float3 qvec = float3(q.x, q.y, q.z);
+    float3 uv = f3Cross(qvec, v);
+    float3 uuv = f3Cross(qvec, uv);
+    uv = f3MulScalar(uv, 2.0 * q.w);
+    uuv = f3MulScalar(uuv, 2.0f);
+
+    return f3Add(v, f3Add(uv, uuv));
+}
+transpile quat  quatConj(quat q) { return quat(-q.x, -q.y, -q.z, q.w); }
+transpile float quatLengthSquared(quat q) { return q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w; }
+transpile quat  quatNormalize(quat q)
+{
+    quat  qq = q;
+    float n = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
+
+    if (n < 0.0000000001)
+    {
+        qq.w = 1;
+        return qq;
+    }
+
+    qq = quatMulScalar(qq, 1.0f / sqrt(n));
+    return qq;
+}
+transpile quat quatFromUnitVectors(float3 u, float3 v)
+{
+    float  r = 1.f + f3Dot(u, v);
+    float3 n;
+
+    // if u and v are parallel
+    if (r < 0.0000001)
+    {
+        r = 0.0f;
+        n = fabsf(u.x) > fabsf(u.z) ? float3(-u.y, u.x, 0.f) : float3(0.f, -u.z, u.y);
+    }
+    else
+    {
+        n = f3Cross(u, v);
+    }
+
+    quat q = quat(n.x, n.y, n.z, r);
+    return quatNormalize(q);
+}
+transpile quat quatInverse(quat q)
+{
+    quat  con = quatConj(q);
+    float d = 1.0 / f4Dot(quatTof4(q), quatTof4(q));
+    return f4ToQuat(f4MulScalar(quatTof4(con), d));
+}
+
+transpile quat euluerRadToQuat(float3 e)
+{
+    float cy = cos(e.z * 0.5);
+    float sy = sin(e.z * 0.5);
+    float cp = cos(e.y * 0.5);
+    float sp = sin(e.y * 0.5);
+    float cr = cos(e.x * 0.5);
+    float sr = sin(e.x * 0.5);
+
+    quat q;
+    q.w = cr * cp * cy + sr * sp * sy;
+    q.x = sr * cp * cy - cr * sp * sy;
+    q.y = cr * sp * cy + sr * cp * sy;
+    q.z = cr * cp * sy - sr * sp * cy;
+    return q;
+}
+
+transpile float3 quatToEulerRad(quat q)
+{
+    float qx2 = (q.x + q.x);
+    float qy2 = (q.y + q.y);
+    float qz2 = (q.z + q.z);
+    float qxqx2 = (q.x * qx2);
+    float qxqy2 = (q.x * qy2);
+    float qxqz2 = (q.x * qz2);
+    float qxqw2 = (q.w * qx2);
+    float qyqy2 = (q.y * qy2);
+    float qyqz2 = (q.y * qz2);
+    float qyqw2 = (q.w * qy2);
+    float qzqz2 = (q.z * qz2);
+    float qzqw2 = (q.w * qz2);
+
+    float r11 = ((1.0 - qyqy2) - qzqz2);
+    float r12 = (qxqy2 + qzqw2);
+    float r13 = (qxqz2 - qyqw2);
+    float r23 = (qyqz2 + qxqw2);
+    float r33 = ((1.0 - qxqx2) - qyqy2);
+
+    float angleX = atan2(r23, r33);
+    float angleY = atan2(-r13, sqrt(r23 * r23 + r33 * r33));
+    float angleZ = atan2(r12, r11);
+
+    return float3(angleX, angleY, angleZ);
+}
+
+
+
+#ifndef FLT_MAX
+#define FLT_MAX 340282346600000000000000000000000000000.0
+#endif
+#ifndef FLT_MIN
+#define FLT_MIN 0.00000000000000000000000000000000000001175494351
+#endif
+
+transpile void aabbTransform(inout TFAABB aabb, f4x4 t)
+{
+    float3 newCorners[8];
+
+    newCorners[0] = float3(aabb.min.x, aabb.max.y, aabb.max.z);
+    newCorners[1] = float3(aabb.min.x, aabb.min.y, aabb.max.z);
+    newCorners[2] = float3(aabb.max.x, aabb.min.y, aabb.max.z);
+    newCorners[3] = float3(aabb.max.x, aabb.max.y, aabb.max.z);
+    newCorners[4] = float3(aabb.max.x, aabb.max.y, aabb.min.z);
+    newCorners[5] = float3(aabb.max.x, aabb.min.y, aabb.min.z);
+    newCorners[6] = float3(aabb.min.x, aabb.min.y, aabb.min.z);
+    newCorners[7] = float3(aabb.min.x, aabb.max.y, aabb.min.z);
+
+    aabb.min = float3Aligned(FLT_MAX, FLT_MAX, FLT_MAX);
+    aabb.max = float3Aligned(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+
+    for (int i = 0; i < 8; i += 1)
+    {
+        // ISPC bug: cannot dereference function return values directly.
+        float4 xyzw = (f4x4Mulf4(t, float4(newCorners[i].x, newCorners[i].y, newCorners[i].z, 1.0)));
+        newCorners[i] = xyzw.xyz;
+        aabb.min = f3LengthSqr(float3(aabb.min.x, aabb.min.y, aabb.min.z)) < f3LengthSqr(newCorners[i])
+                       ? aabb.min
+                       : float3Aligned(newCorners[i].x, newCorners[i].y, newCorners[i].z);
+        aabb.max = f3LengthSqr(float3(aabb.max.x, aabb.max.y, aabb.max.z)) > f3LengthSqr(newCorners[i])
+                       ? aabb.max
+                       : float3Aligned(newCorners[i].x, newCorners[i].y, newCorners[i].z);
+    }
+}
+
+//----------------------------------------------------------------------------
+// Gemetry functions / intersection / closest point
+//----------------------------------------------------------------------------
+
+transpile float4 makePlaneAsFloat4(float3 normal, float3 origin)
+{
+    return float4(normal.x, normal.y, normal.z, f3Dot(normal, origin));
+}
+
+transpile int intersectionRayDistPlane(float3 origin, float3 dir, float4 plane, inout float3 p)
+{
+    float denom = f3Dot(plane.xyz, dir);
+    if (fabsf(denom) > FLT_MIN)
+    {
+        float t = f3Dot(f3Sub(f3MulScalar(plane.xyz, plane.w), origin), plane.xyz) / denom;
+        if (t >= 0.0)
+        {
+            p = f3Add(origin, f3MulScalar(dir, t));
+            return 1;
+        }
+    }
+    return 0;
+}
+
+transpile float3 projectPointOnPlane(float3 p, float4 plane)
+{
+    float t = f3Dot(f3Sub(p, f3MulScalar(plane.xyz, plane.w)), plane.xyz);
+    return f3Sub(p, f3MulScalar(plane.xyz, t));
+}
+
+transpile float closestPointRaySegment(float3 p, float3 d, float3 a, float3 b, inout float t, inout float s, inout float3 c1, inout float3 c2)
+{
+    float3 m = f3Sub(p, a);
+    float3 n = f3Sub(b, a);
+    float  md = f3Dot(m, d);
+    float  nd = f3Dot(n, d);
+    float  nn = f3Dot(n, n);
+    float  mn = f3Dot(m, n);
+    float  dd = f3Dot(d, d);
+
+    float denom = dd * nn - nd * nd;
+
+    s = 0.0;
+    if (denom != 0.0)
+    {
+        s = (dd * mn - nd * md) / denom;
+        s = clamp(s, 0.0, 1.0);
+    }
+
+    t = (nd * s - md) / dd;
+    if (t < 0.0)
+        t = 0.0;
+
+    c1 = f3Add(p, f3MulScalar(d, t));
+    c2 = f3Add(a, f3MulScalar(n, s));
+
+    return f3Dot(f3Sub(c1, c2), f3Sub(c1, c2));
+}
+
+transpile int intersectionRayAABB(float3 origin, float3 direction, TFAABB aabb, inout float3 c)
+{
+    float3 dirfrac;
+    dirfrac.x = 1.0f / direction.x;
+    dirfrac.y = 1.0f / direction.y;
+    dirfrac.z = 1.0f / direction.z;
+
+    float t1 = (aabb.min.x - origin.x) * dirfrac.x;
+    float t2 = (aabb.max.x - origin.x) * dirfrac.x;
+    float t3 = (aabb.min.y - origin.y) * dirfrac.y;
+    float t4 = (aabb.max.y - origin.y) * dirfrac.y;
+    float t5 = (aabb.min.z - origin.z) * dirfrac.z;
+    float t6 = (aabb.max.z - origin.z) * dirfrac.z;
+
+    float tmin = max(max(min(t1, t2), min(t3, t4)), min(t5, t6));
+    float tmax = min(min(max(t1, t2), max(t3, t4)), max(t5, t6));
+
+    if (tmax < 0)
+    {
+        return 0;
+    }
+
+    if (tmin > tmax)
+    {
+        return 0;
+    }
+
+    c = f3Add(origin, f3MulScalar(direction, tmin));
+    return 1;
+}
+
+transpile bool IsPointInTriangle(float2 p, float2 a, float2 b, float2 c, inout float2 baryCoords)
+{
+	float u = ((b.y - c.y)*(p.x - c.x) + (c.x - b.x)*(p.y - c.y)) / ((b.y - c.y)*(a.x - c.x) + (c.x - b.x)*(a.y - c.y));
+	float v = ((c.y - a.y)*(p.x - c.x) + (a.x - c.x)*(p.y - c.y)) / ((b.y - c.y)*(a.x - c.x) + (c.x - b.x)*(a.y - c.y));
+	float w = 1 - u - v;
+    
+	baryCoords.x = u;
+	baryCoords.y = v;
+
+    return (0 <= u  && u <= 1 && 0 <= v && v <= 1 && 0 <= w && w <= 1);
+}
+
+// Calculates the local (barycentric coordinates) position of a ray hitting a triangle (Muller-Trumbore algorithm)
+// Parameters: p0,p1,p2 -> World space coordinates of triangle
+// o -> Origin of ray in world space (Mainly view camera here)
+// d-> Unit vector direction of ray from origin
+float3 rayTriangleIntersection(float3 p0, float3 p1, float3 p2, float3 o, float3 d)
+{
+	float3 v0v1 = p1-p0;
+	float3 v0v2 = p2-p0;
+	float3 pvec = f3Cross(d,v0v2);
+	float det = f3Dot(v0v1,pvec);
+	float invDet = 1/det;
+	float3 tvec = o - p0;
+	float u = f3Dot(tvec,pvec) * invDet;
+	float3 qvec = f3Cross(tvec,v0v1);
+	float v = f3Dot(d,qvec) *invDet;
+	float w = 1.0f - v - u;
+	return float3(w,u,v);
+}
+
+//----------------------------------------------------------------------------
+// Color conversions / packing / unpacking
+//----------------------------------------------------------------------------
+#define GAMMA_VALUE 2.4
+
+transpile float srgbToLinearf(float val)
+{
+    float threshold = 0.04045;
+    if (val <= threshold)
+        return val / 12.92;
+
+    return pow((val + 0.055) / 1.055, GAMMA_VALUE);
+}
+transpile float3 srgbToLinearf3(float3 val) { return float3(srgbToLinearf(val.x), srgbToLinearf(val.y), srgbToLinearf(val.z)); }
+transpile float4 srgbToLinearf4(float4 val) { return float4(srgbToLinearf(val.x), srgbToLinearf(val.y), srgbToLinearf(val.z), val.w); }
+transpile float  linearToSrgbf(float val)
+{
+    float threshold = 0.0031308;
+    if (val <= threshold)
+        return val * 12.92;
+    return 1.055 * pow(val, 1.0 / GAMMA_VALUE) - 0.055;
+}
+transpile float3 linearToSrgbf3(float3 val) { return float3(linearToSrgbf(val.x), linearToSrgbf(val.y), linearToSrgbf(val.z)); }
+transpile float4 linearToSrgbf4(float4 val) { return float4(linearToSrgbf(val.x), linearToSrgbf(val.y), linearToSrgbf(val.z), val.w); }
+// Converts U32 color defined as 0x11223344 into float4 color
+// where 11 - alpha, 22 - blue, 33 - g, 44 - red
+transpile float4 unpackA8B8G8R8(uint color)
+{
+    return float4(
+        float((color >> 24) & 0xFF) / 255.0,
+        float((color >> 16) & 0xFF) / 255.0,
+        float((color >> 8)  & 0xFF) / 255.0,
+        float(color & 0xFF) / 255.0
+    );
+}
+// Converts U32 color defined as 0x11223344 into float4 color
+// where 11 - alpha, 22 - blue, 33 - g, 44 - red
+// Performs conversion from srgb to linear color space
+transpile float4 unpackA8B8G8R8_SRGB(uint color) { return srgbToLinearf4(unpackA8B8G8R8(color)); }
+// Converts float4 into U32 color defined as 0x11223344
+// where 11 - alpha, 22 - blue, 33 - g, 44 - red
+// Performs conversion from linear to srgb color space
+transpile uint   packA8B8G8R8(float4 color)
+{
+    uint result = 0;
+    result |= uint((clamp(color[3], 0.0, 1.0) * 255.0));
+    result |= uint((clamp(color[2], 0.0, 1.0) * 255.0)) << 0x8;
+    result |= uint((clamp(color[1], 0.0, 1.0) * 255.0)) << 0x10;
+    result |= uint((clamp(color[0], 0.0, 1.0) * 255.0)) << 0x18;
+    return result;
+}
+// Converts float4 into U32 color defined as 0x11223344
+// where 11 - alpha, 22 - blue, 33 - g, 44 - red
+// Performs conversion from linear to srgb color space
+transpile uint packA8B8G8R8_SRGB(float4 color)
+{
+    color = linearToSrgbf4(color);
+    return packA8B8G8R8(color);
+}
+// Converts U32 color defined as 0x11223344 into float4 color
+// where 44 - red, 33 - green, 22 - blue, 11 - alpha
+transpile float4 unpackR8G8B8A8(uint color)
+{
+    return float4(float(color & 0x000000FF) / 255.0, float((color & 0x0000FF00) >> 0x8) / 255.0,
+                    float((color & 0x00FF0000) >> 0x10) / 255.0, float((color & 0xFF000000) >> 0x18) / 255.0);
+}
+
+// Converts U32 val defined as 0x00001122 into float2 val
+transpile float2 unpackR8G8(uint val)
+{
+    return float2(float(val & 0x000000FF) / 255.0, float((val & 0x0000FF00) >> 0x8) / 255.0);
+}
+
+// Converts float2 into U32 val defined as 0x00001122
+transpile uint   packR8G8(float2 val)
+{
+    uint result = 0;
+    result |= uint(clamp(val[0], 0.0, 1.0) * 255.0 + 0.5);
+    result |= uint(clamp(val[1], 0.0, 1.0) * 255.0 + 0.5) << 8;
+    return result;
+}
+
+// Converts U32 color defined as 0x11223344 into float4 color
+// where 11 - red, 22 - green, 33 - blue, 44 - alpha
+// Performs conversion from srgb to linear color space
+transpile float4 unpackR8G8B8A8_SRGB(uint color) { return srgbToLinearf4(unpackR8G8B8A8(color)); }
+// Converts float4 into U32 color defined as 0x11223344
+// where 11 - red, 22 - green, 33 - blue, 44 - alpha
+transpile uint   packR8G8B8A8(float4 color)
+{
+    uint result = 0;
+    result |= uint((clamp(color[0], 0.0, 1.0) * 255.0) + 0.5);
+    result |= uint((clamp(color[1], 0.0, 1.0) * 255.0) + 0.5) << 8;
+    result |= uint((clamp(color[2], 0.0, 1.0) * 255.0) + 0.5) << 16;
+    result |= uint((clamp(color[3], 0.0, 1.0) * 255.0) + 0.5) << 24;
+    return result;
+}
+// Converts float4 into U32 color defined as 0x11223344
+// where 11 - red, 22 - green, 33 - blue, 44 - alpha
+// Performs conversion from linear to srgb color space
+transpile uint packR8G8B8A8_SRGB(float4 color)
+{
+    color = linearToSrgbf4(color);
+    return packR8G8B8A8(color);
+}
+
+transpile float3 rgbeToRGB(uint r, uint g, uint b, uint a)
+{
+    if (a != 0)
+    {
+        return f3MulScalar(float3(r, g, b), exp(float(a - int(128 + 8))));
+    }
+    return float3(0, 0, 0);
+}
+transpile uint rgbToRGBE8(float3 rgb)
+{
+    float v = max(rgb.x, rgb.y);
+    v = max(v, rgb.z);
+
+    if (v < 0.00000000000000000000000000000001)
+    {
+        return 0;
+    }
+    else
+    {
+        int   ex;
+        float m = frexp(v, ex) * 256.0 / v;
+
+        uint r = uint((m * rgb.x));
+        uint g = uint((m * rgb.y));
+        uint b = uint((m * rgb.z));
+        uint e = uint((ex + 128));
+
+        return r | (g << 8) | (b << 16) | (e << 24);
+    }
+}
+transpile uint rgbToRGB9E5(float3 rgb)
+{
+    float v = max(rgb.x, rgb.y);
+    v = max(v, float(rgb.z));
+
+    if (v < 0.0000152587890625)
+    {
+        return 0;
+    }
+    else if (v < 65536)
+    {
+        int   ex;
+        float m = frexp(v, ex) * 512.0 / v;
+
+        uint r = uint((m * rgb.x));
+        uint g = uint((m * rgb.y));
+        uint b = uint((m * rgb.z));
+        uint e = uint((ex + 15));
+
+        return r | (g << 9) | (b << 18) | (e << 27);
+    }
+    else
+    {
+        uint r = (rgb.x < 65536) ? uint((rgb.x * (1.0 / 128.0))) : 0x1FF;
+        uint g = (rgb.y < 65536) ? uint((rgb.y * (1.0 / 128.0))) : 0x1FF;
+        uint b = (rgb.z < 65536) ? uint((rgb.z * (1.0 / 128.0))) : 0x1FF;
+        uint e = 31;
+
+        return r | (g << 9) | (b << 18) | (e << 27);
+    }
+}
+
+transpile uint toRGBA(float4 u) { return (int(u.x * 255) << 0) | (int(u.y * 255) << 8) | (int(u.z * 255) << 16) | (int(u.w * 255) << 24); }
+transpile uint toBGRA(float4 u) { return (int(u.z * 255) << 0) | (int(u.y * 255) << 8) | (int(u.x * 255) << 16) | (int(u.w * 255) << 24); }
+
+transpile float degToRad(float degrees) { return (degrees * PI / 180.0); }
+transpile float radToDeg(float radians) { return (radians * 180.0 / PI); }
+transpile bool  isPowerOf2(int x) { return (x & (x - 1)) == 0; } // Note: returns true for 0
+
+transpile uint getClosestPowerOfTwo(uint x)
+{
+    uint i = 1;
+    while (i < x)
+        i += i;
+
+    if (4 * x < 3 * i)
+        i >>= 1;
+    return i;
+}
+
+transpile uint getUpperPowerOfTwo(uint x)
+{
+    uint i = 1;
+    while (i < x)
+        i += i;
+
+    return i;
+}
+
+transpile uint getLowerPowerOfTwo(uint x)
+{
+    uint i = 1;
+    while (i <= x)
+        i += i;
+
+    return i >> 1;
+}
+
+transpile uint round_up(uint value, uint multiple) { return ((value + multiple - 1) / multiple) * multiple; }
+transpile uint round_down(uint value, uint multiple) { return value - value % multiple; }
+
+///
+// Batching (C interface)
+
+// TODO define per platform (performance varies a lot with this number)
+// https://docs.google.com/spreadsheets/d/1a_ion0FuPcPiM_Pp-veSRTWV7IKK_6xT02haEWVMlLo/edit?usp=sharing
+// A18
+#define F4X4_MULS_PER_TASK 200
+
+inline f4x4 f4x4TransposeWide(f4x4 m)
+{
+    f4x4 t;
+    t[0][0] = m[0][0];
+    t[1][1] = m[1][1];
+    t[2][2] = m[2][2];
+    t[3][3] = m[3][3];
+
+    t[0][1] = m[1][0];
+    t[0][2] = m[2][0];
+    t[0][3] = m[3][0];
+    t[1][0] = m[0][1];
+    t[1][2] = m[2][1];
+    t[1][3] = m[3][1];
+    t[2][0] = m[0][2];
+    t[2][1] = m[1][2];
+    t[2][3] = m[3][2];
+    t[3][0] = m[0][3];
+    t[3][1] = m[1][3];
+    t[3][2] = m[2][3];
+
+    return t;
+}
+
+inline void f4x4MulBatchSome(inout Uniform(f4x4) a[], inout Uniform(f4x4) b[], out Uniform(f4x4) result[], Uniform(int) start,
+                             Uniform(int) totalCount)
+{
+    Uniform(int) offset = start * F4X4_MULS_PER_TASK;
+    foreach (m = offset... min(offset + F4X4_MULS_PER_TASK, totalCount), col = 0 ... 4)
+    {
+        f4x4 at = f4x4TransposeWide(a[m]);
+        result[m][col][0] = at[0].x * b[m][col].x + at[0].y * b[m][col].y + at[0].z * b[m][col].z + at[0].w * b[m][col].w;
+        result[m][col][1] = at[1].x * b[m][col].x + at[1].y * b[m][col].y + at[1].z * b[m][col].z + at[1].w * b[m][col].w;
+        result[m][col][2] = at[2].x * b[m][col].x + at[2].y * b[m][col].y + at[2].z * b[m][col].z + at[2].w * b[m][col].w;
+        result[m][col][3] = at[3].x * b[m][col].x + at[3].y * b[m][col].y + at[3].z * b[m][col].z + at[3].w * b[m][col].w;
+    }
+}
+
+task void f4x4MulBatchTask(inout Uniform(f4x4) a[], inout Uniform(f4x4) b[], out Uniform(f4x4) result[], Uniform(int) totalCount)
+{
+    f4x4MulBatchSome(a, b, result, taskIndex, totalCount);
+}
+cexport void f4x4MulBatchMT(inout Uniform(f4x4) a[], inout Uniform(f4x4) b[], out Uniform(f4x4) result[], Uniform(int) count)
+{
+    if (count == 0)
+        return;
+
+    Uniform(int) taskCount = (count + (F4X4_MULS_PER_TASK - 1)) / F4X4_MULS_PER_TASK;
+    if (taskCount == 1)
+    {
+        f4x4MulBatchSome(a, b, result, 0, count);
+    }
+    else
+    {
+        launch[taskCount - 1] f4x4MulBatchTask(a, b, result, count);
+
+        // Do one task on this thread instead of just waiting, so we're not wasting any threads.
+        f4x4MulBatchSome(a, b, result, taskCount - 1, count);
+    }
+}
+cexport void f4x4MulBatchST(inout Uniform(f4x4) a[], inout Uniform(f4x4) b[], out Uniform(f4x4) result[], Uniform(int) count)
+{
+    if (count == 0)
+        return;
+
+    foreach (m = 0 ... count, col = 0 ... 4)
+    {
+        f4x4 at = f4x4TransposeWide(a[m]);
+        result[m][col][0] = at[0].x * b[m][col].x + at[0].y * b[m][col].y + at[0].z * b[m][col].z + at[0].w * b[m][col].w;
+        result[m][col][1] = at[1].x * b[m][col].x + at[1].y * b[m][col].y + at[1].z * b[m][col].z + at[1].w * b[m][col].w;
+        result[m][col][2] = at[2].x * b[m][col].x + at[2].y * b[m][col].y + at[2].z * b[m][col].z + at[2].w * b[m][col].w;
+        result[m][col][3] = at[3].x * b[m][col].x + at[3].y * b[m][col].y + at[3].z * b[m][col].z + at[3].w * b[m][col].w;
+    }
+}

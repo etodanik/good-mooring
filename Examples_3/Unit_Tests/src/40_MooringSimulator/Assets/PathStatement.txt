@@ -1,0 +1,9 @@
+bundled RD_SHADER_BINARIES = Shaders/
+bundled RD_FONTS = Fonts/
+bundled RD_GPU_CONFIG = GPUCfg/
+bundled RD_OTHER_FILES = Data/
+RD_LOG = ./
+RD_DEBUG = ./
+RD_PIPELINE_CACHE = ./
+bundled RD_TEXTURES = Textures/
+RD_SCREENSHOTS = QA/

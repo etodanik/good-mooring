@@ -1,0 +1,2095 @@
+--- a/Common_3/Graphics/Metal/MetalRenderer.mm
++++ b/Common_3/Graphics/Metal/MetalRenderer.mm
+@@ -59,16 +59,19 @@
+ 
+ #include "../../Utilities/Interfaces/ILog.h"
+ 
+-#include "../../Utilities/Math/MathTypes.h"
++#include "../../Utilities/Interfaces/IMath.h"
+ #include "../../Utilities/Threading/Atomics.h"
+ 
+ #include "MetalCapBuilder.h"
+ #include "MetalMemoryAllocatorImpl.h"
+ 
++#include "../../../Tools/Mooring/TracyMetal.h"
+ #include "../../Utilities/Interfaces/IMemory.h"
+-
+-#if defined(AUTOMATED_TESTING)
+-#include "IScreenshot.h"
++#include "MetalDescriptors.h"
++extern "C" uint32_t getGPUModelID(const char* modelName);
++
++#if defined(ENABLE_SCREENSHOT)
++#include "../../Application/Interfaces/IScreenshot.h"
+ #endif
+ #define MAX_BUFFER_BINDINGS            31
+ // Start vertex attribute bindings at index 30 and decrement so we can bind regular buffers from index 0 for simplicity
+@@ -300,7 +303,7 @@
+ void util_unset_debug_group(TFCmd* pCmd);
+ 
+ id<MTLCounterSet>          util_get_counterset(id<MTLDevice> device);
+-MTLCounterResultTimestamp* util_resolve_counter_sample_buffer(uint32_t startSample, uint32_t sampleCount,
++NSData* util_resolve_counter_sample_buffer(uint32_t startSample, uint32_t sampleCount,
+                                                               id<MTLCounterSampleBuffer> pSampleBuffer);
+ void                       util_update_gpu_to_cpu_timestamp_factor(TFRenderer* pRenderer);
+ // GPU frame time accessor for macOS and iOS
+@@ -397,8 +400,9 @@
+     ASSERT(pDescriptorSet);
+     ASSERT(index < pDescriptorSet->mMaxSets);
+ 
+-    pCmd->mBoundDescriptorSets[pDescriptorSet->mNodeIndex] = pDescriptorSet;
+-    pCmd->mBoundDescriptorSetIndices[pDescriptorSet->mNodeIndex] = index;
++    pCmd->mBoundDescriptorSets[pDescriptorSet->mSetIndex] = pDescriptorSet;
++    pCmd->mBoundDescriptorSetIndices[pDescriptorSet->mSetIndex] = index;
++    if (!pCmd->pBoundPipeline) return;
+     uint8_t stages = (pCmd->pBoundPipeline->mType == TF_PIPELINE_TYPE_COMPUTE) ? TF_SHADER_STAGE_COMP : TF_SHADER_STAGE_VERT | TF_SHADER_STAGE_FRAG;
+     if (pDescriptorSet->pRootDescriptorData)
+     {
+@@ -488,17 +492,17 @@
+         // argument buffers
+         if (stages & TF_SHADER_STAGE_VERT)
+         {
+-            [pCmd->pRenderEncoder setVertexBuffer:buffer offset:offset atIndex:pDescriptorSet->mNodeIndex];
++            [pCmd->pRenderEncoder setVertexBuffer:buffer offset:offset atIndex:pDescriptorSet->mArgumentBufferIndex];
+         }
+ 
+         if (stages & TF_SHADER_STAGE_FRAG)
+         {
+-            [pCmd->pRenderEncoder setFragmentBuffer:buffer offset:offset atIndex:pDescriptorSet->mNodeIndex];
++            [pCmd->pRenderEncoder setFragmentBuffer:buffer offset:offset atIndex:pDescriptorSet->mArgumentBufferIndex];
+         }
+ 
+         if (stages & TF_SHADER_STAGE_COMP)
+         {
+-            [pCmd->pComputeEncoder setBuffer:buffer offset:offset atIndex:pDescriptorSet->mNodeIndex];
++            [pCmd->pComputeEncoder setBuffer:buffer offset:offset atIndex:pDescriptorSet->mArgumentBufferIndex];
+         }
+ 
+         // useResource on the untracked resources (UAVs, RTs)
+@@ -549,6 +553,7 @@
+ 
+ void addDescriptorSet(TFRenderer* pRenderer, const TFDescriptorSetDesc* pDesc, TFDescriptorSet** ppDescriptorSet)
+ {
++    MTRACY_ZONE("addDescriptorSet");
+     ASSERT(pRenderer);
+     ASSERT(pDesc);
+     ASSERT(ppDescriptorSet);
+@@ -601,7 +606,9 @@
+     ASSERT(pDescriptorSet);
+ 
+     pDescriptorSet->pDescriptors = pDesc->pDescriptors;
+-    pDescriptorSet->mNodeIndex = pDesc->mIndex;
++    pDescriptorSet->mNodeIndex = pDesc->mNodeIndex;
++    pDescriptorSet->mSetIndex = pDesc->mSetIndex;
++    pDescriptorSet->mArgumentBufferIndex = 2 + pDesc->mSetIndex;
+     pDescriptorSet->mMaxSets = pDesc->mMaxSets;
+     pDescriptorSet->mForceArgumentBuffer = pDesc->mForceArgumentBuffer;
+ 
+@@ -936,6 +943,7 @@
+ 
+ void removeDescriptorSet(TFRenderer* pRenderer, TFDescriptorSet* pDescriptorSet)
+ {
++    MTRACY_ZONE("removeDescriptorSet");
+     pDescriptorSet->mArgumentEncoder = nil;
+     if (pDescriptorSet->mArgumentBuffer)
+     {
+@@ -1025,6 +1033,7 @@
+ 
+ void updateDescriptorSet(TFRenderer* pRenderer, uint32_t index, TFDescriptorSet* pDescriptorSet, uint32_t count, const TFDescriptorData* pParams)
+ {
++    MTRACY_ZONE("updateDescriptorSet");
+     ASSERT(pRenderer);
+     ASSERT(pDescriptorSet);
+     ASSERT(index < pDescriptorSet->mMaxSets);
+@@ -1085,105 +1094,29 @@
+                 break;
+             }
+             case TF_DESCRIPTOR_TYPE_TEXTURE:
+-            {
+-                if (useArgumentBuffer)
+-                {
+-                    for (uint32_t j = 0; j < arrayCount; ++j)
++            case TF_DESCRIPTOR_TYPE_RW_TEXTURE:
++            {
++                const MTLResourceUsage usage = type == TF_DESCRIPTOR_TYPE_RW_TEXTURE
++                    ? MTLResourceUsageRead | MTLResourceUsageWrite : MTLResourceUsageRead;
++                RootDescriptorHandle* root = useArgumentBuffer ? nullptr : &pDescriptorSet->pRootDescriptorData[index].pTextures[resIndex];
++                if (root)
++                {
++                    resize_roothandle(root, arrayStart + arrayCount);
++                    root->mCount = max(root->mCount, arrayStart + arrayCount);
++                    root->mBinding = bindIndex;
++                    root->mNonABResource = 1;
++                }
++                for (uint32_t j = 0; j < arrayCount; ++j)
++                {
++                    id<MTLTexture> texture = pParam->mUseTextureDescriptors
++                        ? pParam->ppTextureDescriptors[j]->pSrvUav : pParam->ppTextures[j]->mDesc.pSrvUav;
++                    ASSERT(texture);
++                    if (useArgumentBuffer)
+                     {
+-                        const TFTexture* texture = pParam->ppTextures[j];
+-                        NOREFS id<MTLTexture> untracked = nil;
+-
+-                        if (pParam->mBindStencilResource)
+-                        {
+-                            [pDescriptorSet->mArgumentEncoder setTexture:texture->pStencilTexture atIndex:bindIndex + arrayStart + j];
+-                            untracked = texture->pStencilTexture;
+-                        }
+-                        else if (pParam->mUAVMipSlice)
+-                        {
+-                            [pDescriptorSet->mArgumentEncoder setTexture:texture->pUAVDescriptors[pParam->mUAVMipSlice]
+-                                                                 atIndex:bindIndex + arrayStart + j];
+-                            untracked = texture->pUAVDescriptors[pParam->mUAVMipSlice];
+-                        }
+-                        else
+-                        {
+-                            [pDescriptorSet->mArgumentEncoder setTexture:texture->pTexture atIndex:bindIndex + arrayStart + j];
+-                            untracked = texture->pTexture;
+-                        }
+-
+-                        bool isRT = texture->pTexture.usage & MTLTextureUsageRenderTarget;
+-                        if (isRT || texture->mUav || !texture->pAllocation)
+-                        {
+-                            // TODO: pDesc->mUsage?
+-                            MTLResourceUsage usage = MTLResourceUsageRead;
+-
+-                            TrackUntrackedResource(pDescriptorSet, index, usage, untracked);
+-                        }
++                        [pDescriptorSet->mArgumentEncoder setTexture:texture atIndex:bindIndex + arrayStart + j];
++                        TrackUntrackedResource(pDescriptorSet, index, usage, texture);
+                     }
+-                }
+-                else
+-                {
+-                    RootDescriptorHandle* pData = &pDescriptorSet->pRootDescriptorData[index].pTextures[resIndex];
+-
+-                    resize_roothandle(pData, arrayCount);
+-                    pData->mCount = arrayCount;
+-                    pData->mBinding = bindIndex;
+-                    pData->mNonABResource = 1;
+-                    for (uint32_t j = 0; j < arrayCount; ++j)
+-                    {
+-                        TFTexture* texture = pParam->ppTextures[j];
+-                        if (pParam->mBindStencilResource)
+-                        {
+-                            pData->pArr[j] = pParam->ppTextures[j]->pStencilTexture;
+-                        }
+-                        else if (pParam->mUAVMipSlice)
+-                        {
+-                            pData->pArr[j] = pParam->ppTextures[j]->pUAVDescriptors[pParam->mUAVMipSlice];
+-                        }
+-                        else
+-                        {
+-                            pData->pArr[j] = texture->pTexture;
+-                        }
+-                    }
+-                }
+-
+-                break;
+-            }
+-            case TF_DESCRIPTOR_TYPE_RW_TEXTURE:
+-            {
+-                if (useArgumentBuffer)
+-                {
+-                    if (pParam->mBindMipChain)
+-                    {
+-                        for (uint32_t j = 0; j < pParam->ppTextures[0]->mMipLevels; ++j)
+-                        {
+-                            const TFTexture* texture = pParam->ppTextures[0];
+-                            [pDescriptorSet->mArgumentEncoder setTexture:texture->pUAVDescriptors[j] atIndex:bindIndex + arrayStart + j];
+-                            MTLResourceUsage usage = MTLResourceUsageRead | MTLResourceUsageWrite;
+-                            TrackUntrackedResource(pDescriptorSet, index, usage, texture->pUAVDescriptors[j]);
+-                        }
+-                    }
+-                    else
+-                    {
+-                        for (uint32_t j = 0; j < arrayCount; ++j)
+-                        {
+-                            const TFTexture* texture = pParam->ppTextures[j];
+-                            [pDescriptorSet->mArgumentEncoder setTexture:texture->pUAVDescriptors[pParam->mUAVMipSlice]
+-                                                                 atIndex:bindIndex + arrayStart + j];
+-                            MTLResourceUsage usage = MTLResourceUsageRead | MTLResourceUsageWrite;
+-                            TrackUntrackedResource(pDescriptorSet, index, usage, texture->pUAVDescriptors[pParam->mUAVMipSlice]);
+-                        }
+-                    }
+-                }
+-                else
+-                {
+-                    RootDescriptorHandle* pData = &pDescriptorSet->pRootDescriptorData[index].pTextures[resIndex];
+-                    pData->mBinding = bindIndex;
+-                    pData->mNonABResource = 1;
+-                    resize_roothandle(pData, arrayCount);
+-                    for (uint32_t j = 0; j < arrayCount; ++j)
+-                    {
+-                        pData->pArr[j] = pParam->ppTextures[j]->pUAVDescriptors[pParam->mUAVMipSlice];
+-                    }
++                    else root->pArr[arrayStart + j] = texture;
+                 }
+                 break;
+             }
+@@ -1662,7 +1595,6 @@
+     if (strstr(gpuVendor.mGpuName, "Apple"))
+     {
+         strncpy(gpuVendor.mVendorName, "apple", TF_MAX_GPU_VENDOR_STRING_LENGTH);
+-        extern uint32_t getGPUModelID(const char* modelName);
+         gpuVendor.mModelId = getGPUModelID(gpuVendor.mGpuName);
+         gpuVendor.mVendorId = VENDOR_ID_APPLE;
+     }
+@@ -1892,11 +1824,13 @@
+         return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+     }
+ 
++    MTRACY_ALLOC(*pMemory, pAllocateInfo->allocationSize, "Metal heaps (committed)");
+     return VK_SUCCESS;
+ }
+ 
+ void vkFreeMemory(VkDevice device, VkDeviceMemory memory, const VkAllocationCallbacks* pAllocator)
+ {
++    MTRACY_FREE(memory, "Metal heaps (committed)");
+     uint32_t heapIndex = UINT32_MAX;
+     for (uint32_t i = 0; i < device->mHeapCount; ++i)
+     {
+@@ -2060,7 +1994,7 @@
+ 
+ static void QueryGpuDesc(TFGpuDesc* pGpuDesc)
+ {
+-    id<MTLDevice> gpu = pGpuDesc->pGPU;
++    id<MTLDevice> gpu = (__bridge id<MTLDevice>)pGpuDesc->pGPU;
+ 
+     setDefaultGPUProperties(pGpuDesc);
+     TFGPUVendorPreset& gpuVendor = pGpuDesc->mGpuVendorPreset;
+@@ -2226,10 +2160,10 @@
+ #endif
+ 
+ #ifdef ENABLE_GPU_FAMILY_9
+-    pGpuDesc->m64BitAtomicsSupported = [pGpuDesc->pGPU supportsFamily:MTLGPUFamilyApple9];
++    pGpuDesc->m64BitAtomicsSupported = [(__bridge id<MTLDevice>)pGpuDesc->pGPU supportsFamily:MTLGPUFamilyApple9];
+ #endif // ENABLE_GPU_FAMILY_9
+ #ifdef ENABLE_GPU_FAMILY_8
+-    if ([pGpuDesc->pGPU supportsFamily:MTLGPUFamilyApple8] && [pGpuDesc->pGPU supportsFamily:MTLGPUFamilyMac2])
++    if ([(__bridge id<MTLDevice>)pGpuDesc->pGPU supportsFamily:MTLGPUFamilyApple8] && [(__bridge id<MTLDevice>)pGpuDesc->pGPU supportsFamily:MTLGPUFamilyMac2])
+     {
+         pGpuDesc->m64BitAtomicsSupported = true;
+     }
+@@ -2239,7 +2173,7 @@
+ 
+     if (IOS14_RUNTIME)
+     {
+-        pGpuDesc->pCounterSetTimestamp = util_get_counterset(gpu);
++        pGpuDesc->pCounterSetTimestamp = (__bridge_retained void*)util_get_counterset(gpu);
+         // Mutually exclusive
+         pGpuDesc->mStageBoundarySamplingSupported =
+             pGpuDesc->pCounterSetTimestamp && [gpu supportsCounterSampling:MTLCounterSamplingPointAtStageBoundary];
+@@ -2282,7 +2216,7 @@
+ #if defined(AUTOMATED_TESTING) && defined(ACTIVE_TESTING_GPU)
+     selectActiveGpu(gpuSettings, &gpuIndex, gpuCount);
+ #else
+-    gpuIndex = util_select_best_gpu(gpuDesc, pContext->mGpuCount);
++    gpuIndex = selectBestSupportedGpu(gpuDesc, pContext->mGpuCount);
+ #endif
+ #endif
+ 
+@@ -2293,18 +2227,17 @@
+     //	return false;
+     //}
+ 
+-    ASSERT(gpuIndex < pContext->mGpuCount);
+-
+-    bool gpuSupported = util_check_is_gpu_supported(&gpuDesc[gpuIndex]);
++    bool gpuSupported = gpuIndex < pContext->mGpuCount;
+     if (!gpuSupported)
+     {
+         LOGF(eERROR, "Failed to Init TFRenderer: %s", getUnsupportedGPUMsg());
+         return false;
+     }
+ 
+-    pRenderer->pDevice = gpus[gpuIndex].pGPU;
++    pRenderer->pDevice = (__bridge id<MTLDevice>)gpus[gpuIndex].pGPU;
+     pRenderer->pGpu = &gpus[gpuIndex];
+     pRenderer->mLinkedNodeCount = 1;
++    setGPUConfig(pContext->mGpus, pContext->mGpuCount, gpuIndex, settings->pExtendedSettings);
+ 
+     LOGF(LogLevel::eINFO, "GPU[%d] is selected as default GPU", gpuIndex);
+     LOGF(LogLevel::eINFO, "Name of selected gpu: %s", pRenderer->pGpu->mGpuVendorPreset.mGpuName);
+@@ -2350,10 +2283,10 @@
+     pContext->mGpuCount = gpuCount;
+     for (uint32_t i = 0; i < gpuCount; ++i)
+     {
+-        pContext->mGpus[i].pGPU = gpus[i];
++        pContext->mGpus[i].pGPU = (__bridge_retained void*)gpus[i];
+         QueryGpuDesc(&pContext->mGpus[i]);
+-        mtlCapsBuilder(pContext->mGpus[i].pGPU, &pContext->mGpus[i]);
+-        applyGPUConfigurationRules(&pContext->mGpus[i]);
++        mtlCapsBuilder((__bridge id<MTLDevice>)pContext->mGpus[i].pGPU, &pContext->mGpus[i]);
++        configureGpuSettings(&pContext->mGpus[i]);
+ 
+         LOGF(LogLevel::eINFO, "GPU[%i] detected. Vendor ID: %#x, Model ID: %#x, Preset: %s, GPU Name: %s", i,
+              pContext->mGpus[i].mGpuVendorPreset.mVendorId, pContext->mGpus[i].mGpuVendorPreset.mModelId,
+@@ -2366,11 +2299,17 @@
+ void exitRendererContext(TFRendererContext* pContext)
+ {
+     ASSERT(pContext);
++    for (uint32_t i = 0; i < pContext->mGpuCount; ++i)
++    {
++        if (pContext->mGpus[i].pCounterSetTimestamp) CFRelease(pContext->mGpus[i].pCounterSetTimestamp);
++        if (pContext->mGpus[i].pGPU) CFRelease(pContext->mGpus[i].pGPU);
++    }
+     SAFE_FREE(pContext);
+ }
+ 
+ void initRenderer(const char* appName, const TFRendererDesc* settings, TFRenderer** ppRenderer)
+ {
++    MTRACY_ZONE("initRenderer");
+     TFRenderer* pRenderer = (TFRenderer*)tf_calloc_memalign(1, alignof(TFRenderer), sizeof(*pRenderer));
+     ASSERT(pRenderer);
+ 
+@@ -2497,6 +2436,7 @@
+ 
+ void exitRenderer(TFRenderer* pRenderer)
+ {
++    MTRACY_ZONE("exitRenderer");
+     ASSERT(pRenderer);
+ 
+     remove_default_resources(pRenderer);
+@@ -2573,6 +2513,7 @@
+ 
+ void initQueue(TFRenderer* pRenderer, TFQueueDesc* pDesc, TFQueue** ppQueue)
+ {
++    MTRACY_ZONE("initQueue");
+     ASSERT(pDesc);
+     ASSERT(ppQueue);
+ 
+@@ -2595,13 +2536,16 @@
+     pQueue->pQueueFence = [pRenderer->pDevice newFence];
+     ASSERT(pQueue->pCommandQueue != nil);
+ 
++    mooringTracyMetalInitQueue(pQueue, pRenderer);
+     *ppQueue = pQueue;
+ }
+ 
+ void exitQueue(TFRenderer* pRenderer, TFQueue* pQueue)
+ {
++    MTRACY_ZONE("exitQueue");
+     ASSERT(pQueue);
+ 
++    mooringTracyMetalExitQueue(pQueue);
+     pQueue->pCommandQueue = nil;
+     pQueue->pQueueFence = nil;
+ 
+@@ -2630,6 +2574,7 @@
+ 
+ void initCmd(TFRenderer* pRenderer, const TFCmdDesc* pDesc, TFCmd** ppCmd)
+ {
++    MTRACY_ZONE("initCmd");
+     ASSERT(pRenderer);
+     ASSERT(pRenderer->pDevice != nil);
+     ASSERT(ppCmd);
+@@ -2640,12 +2585,15 @@
+     pCmd->pRenderer = pRenderer;
+     pCmd->pQueue = pDesc->pPool->pQueue;
+ 
++    mooringTracyMetalInitCmd(pCmd);
+     *ppCmd = pCmd;
+ }
+ 
+ void exitCmd(TFRenderer* pRenderer, TFCmd* pCmd)
+ {
++    MTRACY_ZONE("exitCmd");
+     ASSERT(pCmd);
++    mooringTracyMetalExitCmd(pCmd);
+     pCmd->pCommandBuffer = nil;
+ 
+     SAFE_FREE(pCmd);
+@@ -2947,6 +2895,8 @@
+ 
+ void addBuffer(TFRenderer* pRenderer, const TFBufferDesc* pDesc, TFBuffer** ppBuffer)
+ {
++    MTRACY_ZONE("addBuffer");
++    MTRACY_TEXT(pDesc->pName); MTRACY_VALUE(pDesc->mSize);
+     ASSERT(pRenderer);
+     ASSERT(ppBuffer);
+     ASSERT(pDesc);
+@@ -3090,11 +3040,14 @@
+         setBufferName(pRenderer, pBuffer, pDesc->pName);
+     }
+ #endif
++    MTRACY_ALLOC(pBuffer, pDesc->mSize, "Metal buffers (logical)");
+     *ppBuffer = pBuffer;
+ }
+ 
+ void removeBuffer(TFRenderer* pRenderer, TFBuffer* pBuffer)
+ {
++    MTRACY_ZONE("removeBuffer");
++    MTRACY_FREE(pBuffer, "Metal buffers (logical)");
+     ASSERT(pBuffer);
+ 
+     if (!(pBuffer->mDescriptors & TF_DESCRIPTOR_TYPE_INDIRECT_COMMAND_BUFFER))
+@@ -3115,6 +3068,8 @@
+ 
+ void addTexture(TFRenderer* pRenderer, const TFTextureDesc* pDesc, TFTexture** ppTexture)
+ {
++    MTRACY_ZONE("addTexture");
++    MTRACY_TEXT(pDesc->pName);
+     ASSERT(pRenderer);
+     ASSERT(pDesc && pDesc->mWidth && pDesc->mHeight && (pDesc->mDepth || pDesc->mArraySize));
+     if (pDesc->mSampleCount > TF_SAMPLE_COUNT_1 && pDesc->mMipLevels > 1)
+@@ -3128,6 +3083,8 @@
+ 
+ void removeTexture(TFRenderer* pRenderer, TFTexture* pTexture)
+ {
++    MTRACY_ZONE("removeTexture");
++    MTRACY_FREE(pTexture, "Metal textures (logical)");
+     ASSERT(pTexture);
+ 
+ #if defined(MTL_RAYTRACING_AVAILABLE)
+@@ -3140,18 +3097,7 @@
+ 
+     pTexture->pTexture = nil;
+ 
+-    // Destroy descriptors
+-    if (pTexture->pUAVDescriptors && !TinyImageFormat_HasStencil((TinyImageFormat)pTexture->mFormat))
+-    {
+-        for (uint32_t i = 0; i < pTexture->mMipLevels; ++i)
+-        {
+-            pTexture->pUAVDescriptors[i] = nil;
+-        }
+-    }
+-    else
+-    {
+-        pTexture->pStencilTexture = nil;
+-    }
++    pTexture->mDesc.pSrvUav = nil;
+ 
+     if (pTexture->pAllocation)
+     {
+@@ -3163,6 +3109,8 @@
+ 
+ void addRenderTarget(TFRenderer* pRenderer, const TFRenderTargetDesc* pDesc, TFRenderTarget** ppRenderTarget)
+ {
++    MTRACY_ZONE("addRenderTarget");
++    MTRACY_TEXT(pDesc->pName); MTRACY_VALUE(uint64_t(pDesc->mWidth)*pDesc->mHeight);
+     ASSERT(pRenderer);
+     ASSERT(pDesc);
+     ASSERT(ppRenderTarget);
+@@ -3218,6 +3166,7 @@
+ 
+ void removeRenderTarget(TFRenderer* pRenderer, TFRenderTarget* pRenderTarget)
+ {
++    MTRACY_ZONE("removeRenderTarget");
+     removeTexture(pRenderer, pRenderTarget->pTexture);
+ 
+ #if defined(TF_USE_MSAA_RESOLVE_ATTACHMENTS)
+@@ -3286,6 +3235,7 @@
+ 
+ void addShaderBinary(TFRenderer* pRenderer, const TFBinaryShaderDesc* pDesc, TFShader** ppShaderProgram)
+ {
++    MTRACY_ZONE("addShaderBinary");
+     ASSERT(pRenderer);
+     ASSERT(pDesc && pDesc->mStages);
+     ASSERT(ppShaderProgram);
+@@ -3373,6 +3323,7 @@
+ 
+ void removeShader(TFRenderer* pRenderer, TFShader* pShaderProgram)
+ {
++    MTRACY_ZONE("removeShader");
+     ASSERT(pShaderProgram);
+ 
+     pShaderProgram->pVertexShader = nil;
+@@ -3620,6 +3571,8 @@
+ 
+ void addPipeline(TFRenderer* pRenderer, const TFPipelineDesc* pDesc, TFPipeline** ppPipeline)
+ {
++    MTRACY_ZONE("addPipeline");
++    MTRACY_TEXT(pDesc->pName);
+     ASSERT(pRenderer);
+     ASSERT(pRenderer->pDevice != nil);
+ 
+@@ -3643,6 +3596,7 @@
+ 
+ void removePipeline(TFRenderer* pRenderer, TFPipeline* pPipeline)
+ {
++    MTRACY_ZONE("removePipeline");
+     ASSERT(pPipeline);
+ 
+     pPipeline->pRenderPipelineState = nil;
+@@ -3683,6 +3637,8 @@
+ 
+ void beginCmd(TFCmd* pCmd)
+ {
++    MTRACY_ZONE("beginCmd");
++    mooringTracyMetalBeginCmd(pCmd);
+     @autoreleasepool
+     {
+         ASSERT(pCmd);
+@@ -3690,6 +3646,8 @@
+         pCmd->pComputeEncoder = nil;
+         pCmd->pBlitEncoder = nil;
+         pCmd->pBoundPipeline = NULL;
++        memset(pCmd->mBoundDescriptorSets, 0, sizeof(pCmd->mBoundDescriptorSets));
++        memset(pCmd->mBoundDescriptorSetIndices, 0, sizeof(pCmd->mBoundDescriptorSetIndices));
+         pCmd->mBoundIndexBuffer = nil;
+ #if defined(TF_ENABLE_GRAPHICS_DEBUG_ANNOTATION)
+         pCmd->mDebugMarker[0] = '\0';
+@@ -3725,6 +3683,7 @@
+ 
+ void endCmd(TFCmd* pCmd)
+ {
++    MTRACY_ZONE("endCmd");
+     @autoreleasepool
+     {
+         util_end_current_encoders(pCmd, true);
+@@ -3733,10 +3692,15 @@
+ 
+ void cmdBindRenderTargets(TFCmd* pCmd, const TFBindRenderTargetsDesc* pDesc)
+ {
++    MTRACY_ZONE("cmdBindRenderTargets");
+     ASSERT(pCmd);
+ 
+     if (!pDesc)
+     {
++        // Callers may declare the next resource transition after ending the
++        // render pass. Publish its writes now: a barrier in the next encoder
++        // cannot synchronize an encoder that has already ended.
++        util_end_current_encoders(pCmd, true);
+         return;
+     }
+ 
+@@ -3745,7 +3709,27 @@
+         pCmd->mShouldRebindPipeline = 1;
+     }
+ 
+-    const bool hasDepthStencil = pDesc->mDepthStencil.pDepthStencil;
++    struct Attachment {
++        TFRenderTarget* pRenderTarget;
++        TFLoadActionType mLoadAction, mLoadActionStencil;
++        TFStoreActionType mStoreAction, mStoreActionStencil;
++        TFClearValue mClearValue;
++        bool mOverrideClearValue, mUseMipSlice, mUseArraySlice;
++        uint32_t mMipSlice, mArraySlice;
++    };
++    auto decode = [](const TFBindRenderTargetDesc& input) {
++        const TFRenderTargetDescriptor* view = input.mUseRenderTargetDescriptor ? input.pDescriptor : nullptr;
++        Attachment out = {};
++        out.pRenderTarget = view ? view->pRenderTarget : input.pRenderTarget;
++        out.mLoadAction = input.mLoadAction; out.mStoreAction = input.mStoreAction;
++        out.mLoadActionStencil = input.mLoadActionStencil; out.mStoreActionStencil = input.mStoreActionStencil;
++        out.mClearValue = input.mClearValue; out.mOverrideClearValue = input.mOverrideClearValue;
++        if (view) { out.mUseMipSlice = view->mUseMipSlice; out.mUseArraySlice = view->mUseArraySlice;
++            out.mMipSlice = view->mMipSlice; out.mArraySlice = view->mArraySlice; }
++        return out;
++    };
++    const Attachment depth = decode(pDesc->mDepthStencil);
++    const bool hasDepthStencil = depth.pRenderTarget != nullptr;
+ 
+     @autoreleasepool
+     {
+@@ -3754,7 +3738,8 @@
+         // Flush color attachments
+         for (uint32_t i = 0; i < pDesc->mRenderTargetCount; ++i)
+         {
+-            const TFBindRenderTargetDesc* desc = &pDesc->mRenderTargets[i];
++            const Attachment attachment = decode(pDesc->mRenderTargets[i]);
++            const Attachment* desc = &attachment;
+             TFTexture*                    colorAttachment = desc->pRenderTarget->pTexture;
+ 
+             renderPassDesc.colorAttachments[i].texture = colorAttachment->pTexture;
+@@ -3826,16 +3811,16 @@
+ 
+         if (hasDepthStencil)
+         {
+-            const BindDepthTargetDesc* desc = &pDesc->mDepthStencil;
++            const Attachment* desc = &depth;
+             TinyImageFormat            dsFormat =
+-                TinyImageFormat_FromMTLPixelFormat((TinyImageFormat_MTLPixelFormat)desc->pDepthStencil->pTexture->pTexture.pixelFormat);
++                TinyImageFormat_FromMTLPixelFormat((TinyImageFormat_MTLPixelFormat)desc->pRenderTarget->pTexture->pTexture.pixelFormat);
+             bool hasDepth = TinyImageFormat_HasDepth(dsFormat);
+             bool hasStencil = TinyImageFormat_HasStencil(dsFormat);
+ 
+             if (hasDepth)
+             {
+-                const BindDepthTargetDesc* desc = &pDesc->mDepthStencil;
+-                renderPassDesc.depthAttachment.texture = desc->pDepthStencil->pTexture->pTexture;
++                const Attachment* desc = &depth;
++                renderPassDesc.depthAttachment.texture = desc->pRenderTarget->pTexture->pTexture;
+                 if (desc->mUseMipSlice)
+                 {
+                     renderPassDesc.depthAttachment.level = desc->mMipSlice;
+@@ -3847,7 +3832,7 @@
+             }
+             if (hasStencil)
+             {
+-                renderPassDesc.stencilAttachment.texture = desc->pDepthStencil->pTexture->pTexture;
++                renderPassDesc.stencilAttachment.texture = desc->pRenderTarget->pTexture->pTexture;
+                 if (desc->mUseMipSlice)
+                 {
+                     renderPassDesc.stencilAttachment.level = desc->mMipSlice;
+@@ -3861,12 +3846,12 @@
+             renderPassDesc.depthAttachment.loadAction = util_to_mtl_load_action(desc->mLoadAction);
+             // For on-tile (memoryless) textures, we never need to store.
+             renderPassDesc.depthAttachment.storeAction =
+-                desc->pDepthStencil->pTexture->mLazilyAllocated ? MTLStoreActionDontCare : util_to_mtl_store_action(desc->mStoreAction);
++                desc->pRenderTarget->pTexture->mLazilyAllocated ? MTLStoreActionDontCare : util_to_mtl_store_action(desc->mStoreAction);
+ 
+             if (hasStencil)
+             {
+                 renderPassDesc.stencilAttachment.loadAction = util_to_mtl_load_action(desc->mLoadActionStencil);
+-                renderPassDesc.stencilAttachment.storeAction = desc->pDepthStencil->pTexture->mLazilyAllocated
++                renderPassDesc.stencilAttachment.storeAction = desc->pRenderTarget->pTexture->mLazilyAllocated
+                                                                    ? MTLStoreActionDontCare
+                                                                    : util_to_mtl_store_action(desc->mStoreActionStencil);
+             }
+@@ -3876,7 +3861,7 @@
+                 renderPassDesc.stencilAttachment.storeAction = MTLStoreActionDontCare;
+             }
+ 
+-            const TFClearValue& clearValue = desc->mOverrideClearValue ? desc->mClearValue : desc->pDepthStencil->mClearValue;
++            const TFClearValue& clearValue = desc->mOverrideClearValue ? desc->mClearValue : desc->pRenderTarget->mClearValue;
+             renderPassDesc.depthAttachment.clearDepth = clearValue.depth;
+             if (hasStencil)
+             {
+@@ -3940,6 +3925,7 @@
+         }
+ 
+         util_end_current_encoders(pCmd, false);
++        mooringTracyMetalRender(pCmd, renderPassDesc);
+         pCmd->pRenderEncoder = [pCmd->pCommandBuffer renderCommandEncoderWithDescriptor:renderPassDesc];
+ 
+ #if defined(TF_ENABLE_GRAPHICS_DEBUG_ANNOTATION)
+@@ -4016,6 +4002,7 @@
+ 
+ void cmdBindPipeline(TFCmd* pCmd, TFPipeline* pPipeline)
+ {
++    MTRACY_ZONE("cmdBindPipeline");
+     ASSERT(pCmd);
+     ASSERT(pPipeline);
+ 
+@@ -4081,6 +4068,7 @@
+                     }
+ 
+                     util_end_current_encoders(pCmd, barrierRequired);
++                    mooringTracyMetalCompute(pCmd, computePassDescriptor);
+                     pCmd->pComputeEncoder = [pCmd->pCommandBuffer computeCommandEncoderWithDescriptor:computePassDescriptor];
+ #if defined(TF_ENABLE_GRAPHICS_DEBUG_ANNOTATION)
+                     util_set_debug_group(pCmd);
+@@ -4107,6 +4095,10 @@
+             ASSERT(false); // unknown pipeline type
+         }
+     }
++    for (uint32_t i = 0; i < TF_MAX_DESCRIPTOR_SETS; ++i)
++        if (pCmd->mBoundDescriptorSets[i])
++            cmdBindDescriptorSet(pCmd, pCmd->mBoundDescriptorSetIndices[i], pCmd->mBoundDescriptorSets[i]);
++
+ }
+ 
+ void cmdBindIndexBuffer(TFCmd* pCmd, TFBuffer* pBuffer, uint32_t indexType, uint64_t offset)
+@@ -4158,9 +4150,12 @@
+ 
+ void cmdDraw(TFCmd* pCmd, uint32_t vertexCount, uint32_t firstVertex)
+ {
++    MTRACY_ZONE("cmdDraw");
+     ASSERT(pCmd);
+ 
+     RebindState(pCmd);
++    mooringTracyMetalWork(pCmd, "Draw", vertexCount);
++    MTRACY_VALUE(vertexCount);
+ 
+     if (!pCmd->pBoundPipeline->mTessellation)
+     {
+@@ -4182,9 +4177,12 @@
+ 
+ void cmdDrawInstanced(TFCmd* pCmd, uint32_t vertexCount, uint32_t firstVertex, uint32_t instanceCount, uint32_t firstInstance)
+ {
++    MTRACY_ZONE("cmdDrawInstanced");
+     ASSERT(pCmd);
+ 
+     RebindState(pCmd);
++    mooringTracyMetalWork(pCmd, "Draw", uint64_t(vertexCount)*instanceCount);
++    MTRACY_VALUE(uint64_t(vertexCount)*instanceCount);
+ 
+     if (!pCmd->pBoundPipeline->mTessellation)
+     {
+@@ -4218,9 +4216,12 @@
+ 
+ void cmdDrawIndexed(TFCmd* pCmd, uint32_t indexCount, uint32_t firstIndex, uint32_t firstVertex)
+ {
++    MTRACY_ZONE("cmdDrawIndexed");
+     ASSERT(pCmd);
+ 
+     RebindState(pCmd);
++    mooringTracyMetalWork(pCmd, "Draw", indexCount);
++    MTRACY_VALUE(indexCount);
+ 
+     id           indexBuffer = pCmd->mBoundIndexBuffer;
+     MTLIndexType indexType = (MTLIndexType)pCmd->mIndexType;
+@@ -4304,9 +4305,12 @@
+ void cmdDrawIndexedInstanced(TFCmd* pCmd, uint32_t indexCount, uint32_t firstIndex, uint32_t instanceCount, uint32_t firstVertex,
+                              uint32_t firstInstance)
+ {
++    MTRACY_ZONE("cmdDrawIndexedInstanced");
+     ASSERT(pCmd);
+ 
+     RebindState(pCmd);
++    mooringTracyMetalWork(pCmd, "Draw", uint64_t(indexCount)*instanceCount);
++    MTRACY_VALUE(uint64_t(indexCount)*instanceCount);
+ 
+     id           indexBuffer = pCmd->mBoundIndexBuffer;
+     MTLIndexType indexType = (MTLIndexType)pCmd->mIndexType;
+@@ -4399,6 +4403,9 @@
+ 
+ void cmdDispatch(TFCmd* pCmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ)
+ {
++    MTRACY_ZONE("cmdDispatch");
++    mooringTracyMetalWork(pCmd, "Compute", uint64_t(groupCountX)*groupCountY*groupCountZ);
++    MTRACY_VALUE(uint64_t(groupCountX)*groupCountY*groupCountZ);
+     ASSERT(pCmd);
+     ASSERT(pCmd->pComputeEncoder != nil);
+ 
+@@ -4415,6 +4422,9 @@
+ void cmdExecuteIndirect(TFCmd* pCmd, TFIndirectArgumentType type, uint maxCommandCount, TFBuffer* pIndirectBuffer, uint64_t bufferOffset,
+                         TFBuffer* pCounterBuffer, uint64_t counterBufferOffset)
+ {
++    MTRACY_ZONE("cmdExecuteIndirect");
++    mooringTracyMetalWork(pCmd, "Indirect", maxCommandCount);
++    MTRACY_VALUE(maxCommandCount);
+     ASSERT(pCmd);
+ 
+     RebindState(pCmd);
+@@ -4428,7 +4438,7 @@
+             if (!pCmd->pBlitEncoder)
+             {
+                 util_end_current_encoders(pCmd, false);
+-                pCmd->pBlitEncoder = [pCmd->pCommandBuffer blitCommandEncoder];
++                pCmd->pBlitEncoder = mooringTracyMetalBlit(pCmd);
+                 util_set_debug_group(pCmd);
+                 util_barrier_required(pCmd, TF_QUEUE_TYPE_TRANSFER);
+             }
+@@ -4442,7 +4452,7 @@
+             if (!pCmd->pBlitEncoder)
+             {
+                 util_end_current_encoders(pCmd, false);
+-                pCmd->pBlitEncoder = [pCmd->pCommandBuffer blitCommandEncoder];
++                pCmd->pBlitEncoder = mooringTracyMetalBlit(pCmd);
+                 util_set_debug_group(pCmd);
+                 util_barrier_required(pCmd, TF_QUEUE_TYPE_TRANSFER);
+             }
+@@ -4543,6 +4553,7 @@
+ void cmdResourceBarrier(TFCmd* pCmd, uint32_t numBufferBarriers, TFBufferBarrier* pBufferBarriers, uint32_t numTextureBarriers,
+                         TFTextureBarrier* pTextureBarriers, uint32_t numRtBarriers, TFRenderTargetBarrier* pRtBarriers)
+ {
++    MTRACY_ZONE("cmdResourceBarrier");
+     if (numBufferBarriers)
+     {
+         pCmd->pQueue->mBarrierFlags |= BARRIER_FLAG_BUFFERS;
+@@ -4562,6 +4573,7 @@
+ 
+ void cmdUpdateBuffer(TFCmd* pCmd, TFBuffer* pBuffer, uint64_t dstOffset, TFBuffer* pSrcBuffer, uint64_t srcOffset, uint64_t size)
+ {
++    MTRACY_ZONE("cmdUpdateBuffer");
+     ASSERT(pCmd);
+     ASSERT(pSrcBuffer);
+     ASSERT(pSrcBuffer->pBuffer);
+@@ -4573,10 +4585,13 @@
+     if (!pCmd->pBlitEncoder)
+     {
+         util_end_current_encoders(pCmd, false);
+-        pCmd->pBlitEncoder = [pCmd->pCommandBuffer blitCommandEncoder];
++        pCmd->pBlitEncoder = mooringTracyMetalBlit(pCmd);
+         util_set_debug_group(pCmd);
+     }
+ 
++    // Heap resources use explicit hazards. A compute-to-copy transition must
++    // consume the fence emitted when ending the compute encoder.
++    util_barrier_required(pCmd, TF_QUEUE_TYPE_TRANSFER);
+     [pCmd->pBlitEncoder copyFromBuffer:pSrcBuffer->pBuffer
+                           sourceOffset:srcOffset + pSrcBuffer->mOffset
+                               toBuffer:pBuffer->pBuffer
+@@ -4589,14 +4604,19 @@
+     uint64_t mSrcOffset;
+     uint32_t mMipLevel;
+     uint32_t mArrayLayer;
++    uint32_t mX;
++    uint32_t mY;
++    uint32_t mWidth;
++    uint32_t mHeight;
+     uint32_t mRowPitch;
+     uint32_t mSlicePitch;
+ } SubresourceDataDesc;
+ 
+ void cmdUpdateSubresource(TFCmd* pCmd, TFTexture* pTexture, TFBuffer* pIntermediate, const SubresourceDataDesc* pSubresourceDesc)
+ {
++    MTRACY_ZONE("cmdUpdateSubresource");
+     MTLSize sourceSize =
+-        MTLSizeMake(max(1, pTexture->mWidth >> pSubresourceDesc->mMipLevel), max(1, pTexture->mHeight >> pSubresourceDesc->mMipLevel),
++        MTLSizeMake(pSubresourceDesc->mWidth, pSubresourceDesc->mHeight,
+                     max(1, pTexture->mDepth >> pSubresourceDesc->mMipLevel));
+ 
+ #ifdef TARGET_IOS
+@@ -4619,7 +4639,7 @@
+     if (!pCmd->pBlitEncoder)
+     {
+         util_end_current_encoders(pCmd, false);
+-        pCmd->pBlitEncoder = [pCmd->pCommandBuffer blitCommandEncoder];
++        pCmd->pBlitEncoder = mooringTracyMetalBlit(pCmd);
+         util_set_debug_group(pCmd);
+     }
+ 
+@@ -4632,20 +4652,21 @@
+                              toTexture:pTexture->pTexture
+                       destinationSlice:pSubresourceDesc->mArrayLayer
+                       destinationLevel:pSubresourceDesc->mMipLevel
+-                     destinationOrigin:MTLOriginMake(0, 0, 0)
++                     destinationOrigin:MTLOriginMake(pSubresourceDesc->mX, pSubresourceDesc->mY, 0)
+                                options:MTLBlitOptionNone];
+ }
+ 
+ void cmdCopySubresource(TFCmd* pCmd, TFBuffer* pDstBuffer, TFTexture* pTexture, const SubresourceDataDesc* pSubresourceDesc)
+ {
++    MTRACY_ZONE("cmdCopySubresource");
+     MTLSize sourceSize =
+-        MTLSizeMake(max(1, pTexture->mWidth >> pSubresourceDesc->mMipLevel), max(1, pTexture->mHeight >> pSubresourceDesc->mMipLevel),
++        MTLSizeMake(pSubresourceDesc->mWidth, pSubresourceDesc->mHeight,
+                     max(1, pTexture->mDepth >> pSubresourceDesc->mMipLevel));
+ 
+     if (!pCmd->pBlitEncoder)
+     {
+         util_end_current_encoders(pCmd, false);
+-        pCmd->pBlitEncoder = [pCmd->pCommandBuffer blitCommandEncoder];
++        pCmd->pBlitEncoder = mooringTracyMetalBlit(pCmd);
+         util_set_debug_group(pCmd);
+     }
+ 
+@@ -4653,7 +4674,7 @@
+     [pCmd->pBlitEncoder copyFromTexture:pTexture->pTexture
+                             sourceSlice:pSubresourceDesc->mArrayLayer
+                             sourceLevel:pSubresourceDesc->mMipLevel
+-                           sourceOrigin:MTLOriginMake(0, 0, 0)
++                           sourceOrigin:MTLOriginMake(pSubresourceDesc->mX, pSubresourceDesc->mY, 0)
+                              sourceSize:sourceSize
+                                toBuffer:pDstBuffer->pBuffer
+                       destinationOffset:pDstBuffer->mOffset + pSubresourceDesc->mSrcOffset
+@@ -4664,6 +4685,7 @@
+ 
+ void acquireNextImage(TFRenderer* pRenderer, TFSwapChain* pSwapChain, TFSemaphore* pSignalSemaphore, TFFence* pFence, uint32_t* pImageIndex)
+ {
++    MTRACY_ZONE("acquireNextImage");
+     ASSERT(pRenderer);
+     ASSERT(pRenderer->pDevice != nil);
+     ASSERT(pSwapChain);
+@@ -4672,7 +4694,7 @@
+     @autoreleasepool
+     {
+         CAMetalLayer* layer = (CAMetalLayer*)pSwapChain->pForgeView.layer;
+-#ifdef AUTOMATED_TESTING
++#ifdef ENABLE_SCREENSHOT
+         layer.framebufferOnly = !isScreenshotCaptureRequested();
+ #endif
+         pSwapChain->mMTKDrawable = [layer nextDrawable];
+@@ -4680,12 +4702,16 @@
+         pSwapChain->mIndex = (pSwapChain->mIndex + 1) % pSwapChain->mImageCount;
+         *pImageIndex = pSwapChain->mIndex;
+ 
+-        pSwapChain->ppRenderTargets[pSwapChain->mIndex]->pTexture->pTexture = pSwapChain->mMTKDrawable.texture;
++        TFTexture* drawableTexture = pSwapChain->ppRenderTargets[pSwapChain->mIndex]->pTexture;
++        drawableTexture->pTexture = pSwapChain->mMTKDrawable.texture;
++        // Current resource tables bind texture views, including screenshot inputs.
++        drawableTexture->mDesc.pSrvUav = drawableTexture->pTexture;
+     }
+ }
+ 
+ void queueSubmit(TFQueue* pQueue, const TFQueueSubmitDesc* pDesc)
+ {
++    MTRACY_ZONE("queueSubmit");
+     ASSERT(pQueue);
+     ASSERT(pDesc);
+ 
+@@ -4787,7 +4813,7 @@
+             // Commit any uncommitted encoder. This is necessary before committing the command buffer
+             util_end_current_encoders(ppCmds[i], false);
+ 
+-            [ppCmds[i]->pCommandBuffer commit];
++            mooringTracyMetalCommit(ppCmds[i]);
+             ppCmds[i]->pCommandBuffer = nil;
+         }
+     }
+@@ -4795,6 +4821,7 @@
+ 
+ void queuePresent(TFQueue* pQueue, const TFQueuePresentDesc* pDesc)
+ {
++    MTRACY_ZONE("queuePresent");
+     ASSERT(pQueue);
+     ASSERT(pDesc);
+     ASSERT(pDesc->pSwapChain);
+@@ -4834,6 +4861,7 @@
+ 
+ void waitForFences(TFRenderer* pRenderer, uint32_t fenceCount, TFFence** ppFences)
+ {
++    MTRACY_ZONE("waitForFences");
+     ASSERT(pRenderer);
+     ASSERT(fenceCount);
+     ASSERT(ppFences);
+@@ -4850,6 +4878,7 @@
+ 
+ void waitQueueIdle(TFQueue* pQueue)
+ {
++    MTRACY_ZONE("waitQueueIdle");
+     ASSERT(pQueue);
+     id<MTLCommandBuffer> waitCmdBuf = [pQueue->pCommandQueue commandBufferWithUnretainedReferences];
+ 
+@@ -4917,6 +4946,7 @@
+ 
+ void cmdWriteMarker(TFCmd* pCmd, const TFMarkerDesc* pDesc)
+ {
++    MTRACY_ZONE("Metal / Write marker");
+     ASSERT(pCmd);
+     ASSERT(pDesc);
+     ASSERT(pDesc->pBuffer);
+@@ -4925,7 +4955,13 @@
+     if (!pCmd->pComputeEncoder)
+     {
+         util_end_current_encoders(pCmd, waitForWrite);
++#ifdef TRACY_ENABLE
++        MTLComputePassDescriptor* descriptor = [MTLComputePassDescriptor computePassDescriptor];
++        mooringTracyMetalCompute(pCmd, descriptor);
++        pCmd->pComputeEncoder = [pCmd->pCommandBuffer computeCommandEncoderWithDescriptor:descriptor];
++#else
+         pCmd->pComputeEncoder = [pCmd->pCommandBuffer computeCommandEncoder];
++#endif
+         util_set_debug_group(pCmd);
+         util_set_heaps_compute(pCmd);
+     }
+@@ -4938,6 +4974,7 @@
+     [pCmd->pComputeEncoder setBuffer:pDesc->pBuffer->pBuffer offset:pDesc->mOffset atIndex:0];
+     [pCmd->pComputeEncoder setBytes:valueCount length:sizeof(valueCount) atIndex:1];
+     [pCmd->pComputeEncoder dispatchThreadgroups:threadgroupCount threadsPerThreadgroup:threadsPerGroup];
++    mooringTracyMetalWork(pCmd, "Write marker", 1);
+     cmdEndDebugMarker(pCmd);
+ 
+     if (waitForWrite)
+@@ -4966,6 +5003,7 @@
+     ASSERT(pQueryPool);
+ 
+     pQueryPool->mCount = pDesc->mQueryCount;
++    pQueryPool->mType = pDesc->mType;
+ 
+     // Create counter sampler buffer
+     if (pDesc->mType == TF_QUERY_TYPE_TIMESTAMP)
+@@ -4987,7 +5025,7 @@
+             pDescriptor = [[MTLCounterSampleBufferDescriptor alloc] init];
+ 
+             // This counter set instance belongs to the `device` instance.
+-            pDescriptor.counterSet = pRenderer->pGpu->pCounterSetTimestamp;
++            pDescriptor.counterSet = (__bridge id<MTLCounterSet>)pRenderer->pGpu->pCounterSetTimestamp;
+ 
+             // Set the buffer to use shared memory so the CPU and GPU can directly access its contents.
+             pDescriptor.storageMode = MTLStorageModeShared;
+@@ -4996,7 +5034,7 @@
+             pDescriptor.sampleCount = sampleCount;
+             // Create the sample buffer by passing the descriptor to the device's factory method.
+             NSError* error = nil;
+-            pQueryPool->pSampleBuffer = [pRenderer->pGpu->pGPU newCounterSampleBufferWithDescriptor:pDescriptor error:&error];
++            pQueryPool->pSampleBuffer = [pRenderer->pDevice newCounterSampleBufferWithDescriptor:pDescriptor error:&error];
+ 
+             if (error != nil)
+             {
+@@ -5101,7 +5139,8 @@
+     if (pQueryPool->pSampleBuffer != nil)
+     {
+         QuerySampleDesc*           pSample = &((QuerySampleDesc*)pQueryPool->pQueries)[queryIndex];
+-        MTLCounterResultTimestamp* timestamps;
++        const MTLCounterResultTimestamp* timestamps;
++        NSData* resolved;
+         if (pRenderer->pGpu->mStageBoundarySamplingSupported)
+         {
+             uint32_t numSamples = pSample->mRenderSamples;
+@@ -5109,11 +5148,12 @@
+             uint32_t sampleCount = numSamples * NUM_RENDER_STAGE_BOUNDARY_COUNTERS;
+ 
+             // Cast the data's bytes property to the counter's result type.
+-            timestamps = util_resolve_counter_sample_buffer(startSampleIndex, sampleCount, pQueryPool->pSampleBuffer);
++            resolved = util_resolve_counter_sample_buffer(startSampleIndex, sampleCount, pQueryPool->pSampleBuffer);
++            timestamps = (const MTLCounterResultTimestamp*)resolved.bytes;
+ 
+             if (timestamps != nil)
+             {
+-                uint64_t maxVertTime = 0, minFragTime = UINT64_MAX;
++
+                 // Check for invalid values within the (resolved) data from the counter sample buffer.
+                 for (int index = 0; index < numSamples; ++index)
+                 {
+@@ -5128,28 +5168,28 @@
+                     MTLTimestamp eFragTime = timestamps[currentSampleIdx + 3].timestamp;
+ 
+                     if (sVertTime == MTLCounterErrorValue || eVertTime == MTLCounterErrorValue || sFragTime == MTLCounterErrorValue ||
+-                        eFragTime == MTLCounterErrorValue)
++                        eFragTime == MTLCounterErrorValue || eVertTime < sVertTime || eFragTime < sFragTime)
+                     {
+                         LOGF(eWARNING, "Render encoder timestamp sample %u (of %u) has an error value.", currentSampleIdx, sampleCount);
+                         continue;
+                     }
+ 
+-                    sumEncoderTimestamps += (eFragTime - sFragTime) + (eVertTime - sVertTime);
+-
+-                    maxVertTime = max(maxVertTime, eVertTime);
+-                    minFragTime = min(minFragTime, sFragTime);
+-                }
+-
+-                // Subtract overlap delta..
+-                if (minFragTime != UINT64_MAX)
+-                    sumEncoderTimestamps -= (maxVertTime > minFragTime) ? maxVertTime - minFragTime : 0;
++                    // Union the stages within EACH encoder. Subtracting the
++                    // last vertex end from the first fragment start across
++                    // separate encoders can underflow the unsigned duration.
++                    uint64_t overlapStart = max(sVertTime, sFragTime);
++                    uint64_t overlapEnd = min(eVertTime, eFragTime);
++                    uint64_t overlap = overlapEnd > overlapStart ? overlapEnd - overlapStart : 0;
++                    sumEncoderTimestamps += (eFragTime - sFragTime) + (eVertTime - sVertTime) - overlap;
++                }
+             }
+ 
+             numSamples = pSample->mComputeSamples;
+             startSampleIndex = pSample->mComputeStartIndex;
+             sampleCount = numSamples * NUM_COMPUTE_STAGE_BOUNDARY_COUNTERS;
+ 
+-            timestamps = util_resolve_counter_sample_buffer(startSampleIndex, sampleCount, pQueryPool->pSampleBuffer);
++            resolved = util_resolve_counter_sample_buffer(startSampleIndex, sampleCount, pQueryPool->pSampleBuffer);
++            timestamps = (const MTLCounterResultTimestamp*)resolved.bytes;
+ 
+             if (timestamps != nil)
+             {
+@@ -5162,7 +5202,7 @@
+                     MTLTimestamp startTimestamp = timestamps[currentSampleIdx].timestamp;
+                     MTLTimestamp endTimestamp = timestamps[currentSampleIdx + 1].timestamp;
+ 
+-                    if (startTimestamp == MTLCounterErrorValue || endTimestamp == MTLCounterErrorValue)
++                    if (startTimestamp == MTLCounterErrorValue || endTimestamp == MTLCounterErrorValue || endTimestamp < startTimestamp)
+                     {
+                         LOGF(eWARNING, "Compute encoder timestamp sample %u (of %u) has an error value.", currentSampleIdx, sampleCount);
+                         continue;
+@@ -5182,7 +5222,8 @@
+                 pOutData->mEndTimestamp = 0;
+                 return;
+             }
+-            timestamps = util_resolve_counter_sample_buffer(queryIndex * 2, NUM_DRAW_BOUNDARY_COUNTERS, pQueryPool->pSampleBuffer);
++            resolved = util_resolve_counter_sample_buffer(queryIndex * 2, NUM_DRAW_BOUNDARY_COUNTERS, pQueryPool->pSampleBuffer);
++            timestamps = (const MTLCounterResultTimestamp*)resolved.bytes;
+             if (timestamps != nil)
+             {
+                 pOutData->mBeginTimestamp = timestamps[0].timestamp * pRenderer->mGpuToCpuTimestampFactor;
+@@ -5413,6 +5454,7 @@
+ 
+ void util_end_current_encoders(TFCmd* pCmd, bool forceBarrier)
+ {
++    mooringTracyMetalEndEncoder(pCmd);
+     const bool barrierRequired(pCmd->pQueue->mBarrierFlags);
+     UNREF_PARAM(barrierRequired);
+ 
+@@ -5642,13 +5684,14 @@
+     return nil;
+ }
+ 
+-MTLCounterResultTimestamp* util_resolve_counter_sample_buffer(uint32_t startSample, uint32_t sampleCount,
++NSData* util_resolve_counter_sample_buffer(uint32_t startSample, uint32_t sampleCount,
+                                                               id<MTLCounterSampleBuffer> pSampleBuffer)
+ {
+     NSRange range = NSMakeRange(startSample, sampleCount);
+ 
+     // Convert the contents of the counter sample buffer into the standard data format.
+-    const NSData* data = [pSampleBuffer resolveCounterRange:range];
++    if (!sampleCount) return nil;
++    NSData* data = [pSampleBuffer resolveCounterRange:range];
+     if (nil == data)
+     {
+         return nil;
+@@ -5661,8 +5704,8 @@
+         return nil;
+     }
+ 
+-    // Cast the data's bytes property to the counter's result type.
+-    return (MTLCounterResultTimestamp*)(data.bytes);
++    // The caller retains the data while consuming its bytes under ARC.
++    return data;
+ }
+ 
+ void util_update_gpu_to_cpu_timestamp_factor(TFRenderer* pRenderer)
+@@ -5670,7 +5713,7 @@
+     MTLTimestamp currentCpuTimestamp;
+     MTLTimestamp currentGpuTimestamp;
+ 
+-    [pRenderer->pGpu->pGPU sampleTimestamps:&currentCpuTimestamp gpuTimestamp:&currentGpuTimestamp];
++    [pRenderer->pDevice sampleTimestamps:&currentCpuTimestamp gpuTimestamp:&currentGpuTimestamp];
+     if (currentCpuTimestamp > pRenderer->mPrevCpuTimestamp && currentGpuTimestamp > pRenderer->mPrevGpuTimestamp)
+     {
+         double cpuDelta = currentCpuTimestamp - pRenderer->mPrevCpuTimestamp;
+@@ -5808,8 +5851,7 @@
+         ((TFTextureDesc*)pDesc)->mMipLevels = 1;
+ 
+     size_t totalSize = sizeof(TFTexture);
+-    if (pDesc->mDescriptors & TF_DESCRIPTOR_TYPE_RW_TEXTURE)
+-        totalSize += pDesc->mMipLevels * sizeof(id<MTLTexture>);
++
+ 
+     TFTexture* pTexture = (TFTexture*)tf_calloc_memalign(1, alignof(TFTexture), totalSize);
+     ASSERT(pTexture);
+@@ -5818,8 +5860,7 @@
+ 
+     const MemoryType memoryType = isRT ? MEMORY_TYPE_GPU_ONLY_COLOR_RTS : MEMORY_TYPE_GPU_ONLY;
+ 
+-    if (pDesc->mDescriptors & TF_DESCRIPTOR_TYPE_RW_TEXTURE)
+-        pTexture->pUAVDescriptors = (id<MTLTexture> __strong*)mem;
++
+ 
+     MTLPixelFormat pixelFormat = (MTLPixelFormat)TinyImageFormat_ToMTLPixelFormat(pDesc->mFormat);
+ 
+@@ -5923,61 +5964,13 @@
+ 
+             ASSERT(pTexture->pTexture);
+ 
+-            if (TinyImageFormat_HasStencil(pDesc->mFormat))
+-            {
+-                MTLPixelFormat targetStencilFormat = pixelFormat;
+-                switch (pixelFormat)
+-                {
+-                case MTLPixelFormatStencil8:
+-                    targetStencilFormat = MTLPixelFormatStencil8;
+-                    break;
+-                case MTLPixelFormatDepth32Float_Stencil8:
+-                    targetStencilFormat = MTLPixelFormatDepth32Float_Stencil8;
+-                    break;
+-#ifndef TARGET_IOS
+-                case MTLPixelFormatDepth24Unorm_Stencil8:
+-                    targetStencilFormat = MTLPixelFormatX24_Stencil8;
+-                    break;
+-#endif
+-                default:
+-                    ASSERTFAIL("Cannot generate stencil image view");
+-                    break;
+-                }
+-                pTexture->pStencilTexture = [pTexture->pTexture newTextureViewWithPixelFormat:targetStencilFormat];
+-                ASSERT(pTexture->pStencilTexture);
+-            }
+-        }
+-    }
+-
+-    NSRange slices = NSMakeRange(0, pDesc->mArraySize);
+-
+-    if (pDesc->mDescriptors & TF_DESCRIPTOR_TYPE_RW_TEXTURE)
+-    {
+-        MTLTextureType uavType = pTexture->pTexture.textureType;
+-        if (pTexture->pTexture.textureType == MTLTextureTypeCube)
+-        {
+-            uavType = MTLTextureType2DArray;
+-        }
+-        else
+-        {
+-            if (pTexture->pTexture.textureType == MTLTextureTypeCubeArray)
+-            {
+-                uavType = MTLTextureType2DArray;
+-            }
+-        }
+-
+-        for (uint32_t i = 0; i < pDesc->mMipLevels; ++i)
+-        {
+-            NSRange levels = NSMakeRange(i, 1);
+-            pTexture->pUAVDescriptors[i] = [pTexture->pTexture newTextureViewWithPixelFormat:pTexture->pTexture.pixelFormat
+-                                                                                 textureType:uavType
+-                                                                                      levels:levels
+-                                                                                      slices:slices];
+-        }
+-    }
+-
++        }
++    }
++
++    // Default descriptor spans all mips. Explicit views select writable mips.
++    pTexture->mDesc.pSrvUav = pTexture->pTexture;
++    pTexture->mDesc.mFormat = pDesc->mFormat;
+     pTexture->mNodeIndex = pDesc->mNodeIndex;
+-    pTexture->mUav = pDesc->mDescriptors & TF_DESCRIPTOR_TYPE_RW_TEXTURE;
+     pTexture->mMipLevels = pDesc->mMipLevels;
+     pTexture->mWidth = pDesc->mWidth;
+     pTexture->mHeight = pDesc->mHeight;
+@@ -5991,6 +5984,7 @@
+         setTextureName(pRenderer, pTexture, pDesc->pName);
+     }
+ #endif
++    MTRACY_ALLOC(pTexture, pTexture->pTexture.allocatedSize, "Metal textures (logical)");
+     *ppTexture = pTexture;
+ }
+ 
+--- a/Common_3/Graphics/Metal/MetalConfig.h
++++ b/Common_3/Graphics/Metal/MetalConfig.h
+@@ -31,3 +31,6 @@
+ #import <MetalKit/MetalKit.h>
+ 
+ #include "MetalAvailabilityMacros.h"
++
++// The mooring PoC uses rasterization and compute.
++#undef MTL_RAYTRACING_AVAILABLE
+--- a/Common_3/Graphics/Metal/MetalAvailabilityMacros.h
++++ b/Common_3/Graphics/Metal/MetalAvailabilityMacros.h
+@@ -88,6 +88,10 @@
+ 
+ // macOS
+ 
++#if defined(TARGET_APPLE_ARM64)
++#define ENABLE_MEMORYLESS_TEXTURES
++#endif
++
+ #if MAC_OS_X_VERSION_MAX_ALLOWED < 110000
+ #error("Please only compile with macOS SDK version 11 or higher")
+ #endif
+--- a/Common_3/OS/Darwin/iOSWindow.mm
++++ b/Common_3/OS/Darwin/iOSWindow.mm
+@@ -38,7 +38,7 @@
+ #include "../Interfaces/IOperatingSystem.h"
+ #include "../Interfaces/IInput.h"
+ 
+-#include "../../Utilities/Math/MathTypes.h"
++#include "../../Utilities/Interfaces/IMath.h"
+ 
+ IApp* pWindowAppRef = NULL;
+ 
+--- a/Common_3/OS/Darwin/CocoaFileSystem.mm
++++ b/Common_3/OS/Darwin/CocoaFileSystem.mm
+@@ -26,7 +26,7 @@
+ 
+ #import <Foundation/Foundation.h>
+ 
+-#include "../../Utilities/Interfaces/TFIFileSystem.h"
++#include "../../Utilities/Interfaces/IFileSystem.h"
+ #include "../../Utilities/Interfaces/ILog.h"
+ #include "../Interfaces/IOperatingSystem.h"
+ 
+--- a/Common_3/OS/Darwin/DarwinInput.mm
++++ b/Common_3/OS/Darwin/DarwinInput.mm
+@@ -26,7 +26,7 @@
+ #include "../../Utilities/Interfaces/ILog.h"
+ #include "../../Utilities/Interfaces/IThread.h"
+ #include "../../Utilities/Threading/Atomics.h"
+-#include "../../Utilities/Math/MathTypes.h"
++#include "../../Utilities/Interfaces/IMath.h"
+ #include "../Interfaces/IInput.h"
+ 
+ #if !defined(TARGET_IOS)
+@@ -597,6 +597,7 @@
+ /************************************************************************/
+ void platformInitInput(TFWindowDesc* winDesc)
+ {
++    MTRACY_ZONE("platformInitInput");
+ #if defined(ENABLE_FORGE_TOUCH_INPUT)
+     ResetTouchEvents();
+     gVirtualJoystickLeft.mActive = true;
+@@ -758,6 +759,7 @@
+ 
+ void platformExitInput()
+ {
++    MTRACY_ZONE("platformExitInput");
+     GamepadDefault();
+     for (TFInputPortIndex portIndex = 0; portIndex < TF_MAX_GAMEPADS; ++portIndex)
+     {
+@@ -781,8 +783,44 @@
+ #endif
+ }
+ 
++#if !defined(ENABLE_FORGE_TOUCH_INPUT)
++static bool gAppKitButtons[3];
++static bool gAppKitPresses[3];
++static float gAppKitScroll;
++static NSPoint gAppKitCursor;
++static bool gAppKitCursorValid;
++void platformMousePosition(float x, float y)
++{
++    gAppKitCursor = NSMakePoint(x, y);
++    gAppKitCursorValid = true;
++}
++void platformMouseButton(unsigned button, bool down)
++{
++    if (button >= 3) return;
++    gAppKitButtons[button] = down;
++    gAppKitPresses[button] |= down;
++}
++void platformMouseScroll(float delta) { gAppKitScroll += delta; }
++void platformKeyButton(unsigned code, bool down)
++{
++    // AppKit virtual key codes for the prototype's controls. Other keys retain
++    // the GameController mapping used by Forge.
++    TFInputEnum key;
++    switch (code)
++    {
++    case 0: key = K_A; break;
++    case 1: key = K_S; break;
++    case 2: key = K_D; break;
++    case 13: key = K_W; break;
++    default: return;
++    }
++    gInputValues[key] = down;
++}
++#endif
++
+ void platformUpdateInput(uint32_t width, uint32_t height, float dt)
+ {
++    MTRACY_ZONE("platformUpdateInput");
+     memcpy(gLastInputValues, gInputValues, sizeof(gInputValues) - K_COUNT * sizeof(gInputValues[0]));
+     gInputValues[MOUSE_DX] = 0;
+     gInputValues[MOUSE_DY] = 0;
+@@ -803,6 +841,7 @@
+     cursor.y = pMainView.bounds.size.height - cursor.y;
+     cursor.x *= [pMainView.window backingScaleFactor];
+     cursor.y *= [pMainView.window backingScaleFactor];
++    if (gAppKitCursorValid) cursor = gAppKitCursor;
+ #endif
+     gInputValues[MOUSE_X] = cursor.x;
+     gInputValues[MOUSE_Y] = cursor.y;
+@@ -844,6 +883,21 @@
+         }
+     }
+ 
++#if !defined(ENABLE_FORGE_TOUCH_INPUT)
++    // AppKit handles trackpads, accessibility events, and mice already connected
++    // before GameController notifications were registered. Latch short clicks.
++    const bool inside = cursor.x >= 0 && cursor.y >= 0 && cursor.x < width && cursor.y < height;
++    const TFInputEnum buttons[] = { MOUSE_1, MOUSE_2, MOUSE_3 };
++    for (unsigned i = 0; i < 3; ++i)
++    {
++        gInputValues[buttons[i]] = inside && (gAppKitButtons[i] || gAppKitPresses[i]);
++        gAppKitPresses[i] = false;
++    }
++    gInputValues[MOUSE_WHEEL_UP] = max(0.0f, gAppKitScroll);
++    gInputValues[MOUSE_WHEEL_DOWN] = max(0.0f, -gAppKitScroll);
++    gAppKitScroll = 0.0f;
++#endif
++
+     // Raw mouse delta
+     gInputValues[MOUSE_DX] = gRawMouseDelta[0];
+     gInputValues[MOUSE_DY] = gRawMouseDelta[1];
+--- a/Common_3/OS/Darwin/DarwinThread.c
++++ b/Common_3/OS/Darwin/DarwinThread.c
+@@ -50,7 +50,11 @@
+ 
+ void callOnce(CallOnceGuard* pGuard, CallOnceFn pFn) { pthread_once(pGuard, pFn); }
+ 
++#ifdef TRACY_ENABLE
++bool initMutexTracy(TFMutex* pMutex, const char* name)
++#else
+ bool initMutex(TFMutex* pMutex)
++#endif
+ {
+     pMutex->mSpinCount = MUTEX_DEFAULT_SPIN_COUNT;
+     pMutex->pHandle = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+@@ -59,13 +63,27 @@
+     status |= pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+     status |= pthread_mutex_init(&pMutex->pHandle, &attr);
+     status |= pthread_mutexattr_destroy(&attr);
++#ifdef TRACY_ENABLE
++    TracyCLockAnnounce(pMutex->pTracyLock);
++    TracyCLockCustomName(pMutex->pTracyLock, name, strlen(name));
++#endif
+     return status == 0;
+ }
+ 
+-void exitMutex(TFMutex* pMutex) { pthread_mutex_destroy(&pMutex->pHandle); }
++void exitMutex(TFMutex* pMutex)
++{
++    pthread_mutex_destroy(&pMutex->pHandle);
++#ifdef TRACY_ENABLE
++    TracyCLockTerminate(pMutex->pTracyLock);
++#endif
++}
+ 
+ void acquireMutex(TFMutex* pMutex)
+ {
++    MTRACY_ZONE_COLOR("Mutex acquire", 0xBA7B44);
++#ifdef TRACY_ENABLE
++    const bool trace = ___tracy_before_lock_lockable_ctx(pMutex->pTracyLock);
++#endif
+     uint32_t count = 0;
+ 
+     while (count < pMutex->mSpinCount && pthread_mutex_trylock(&pMutex->pHandle) != 0)
+@@ -77,11 +95,31 @@
+         UNREF_PARAM(r);
+         ASSERT(r == 0 && "TFMutex::Acquire failed to take the lock");
+     }
+-}
+-
+-bool tryAcquireMutex(TFMutex* pMutex) { return pthread_mutex_trylock(&pMutex->pHandle) == 0; }
+-
+-void releaseMutex(TFMutex* pMutex) { pthread_mutex_unlock(&pMutex->pHandle); }
++#ifdef TRACY_ENABLE
++    if (trace) TracyCLockAfterLock(pMutex->pTracyLock);
++#endif
++}
++
++bool tryAcquireMutex(TFMutex* pMutex)
++{
++    bool acquired = pthread_mutex_trylock(&pMutex->pHandle) == 0;
++#ifdef TRACY_ENABLE
++    // Tracy 0.14.1's capture validator requires Wait before Obtain, including
++    // successful try-locks. Emit both only after success (no fictitious wait).
++    if (acquired && ___tracy_before_lock_lockable_ctx(pMutex->pTracyLock))
++        TracyCLockAfterLock(pMutex->pTracyLock);
++#endif
++    return acquired;
++}
++
++void releaseMutex(TFMutex* pMutex)
++{
++    // Report before unlocking so another thread cannot obtain ahead of release.
++#ifdef TRACY_ENABLE
++    TracyCLockAfterUnlock(pMutex->pTracyLock);
++#endif
++    pthread_mutex_unlock(&pMutex->pHandle);
++}
+ 
+ bool initConditionVariable(TFConditionVariable* pCv)
+ {
+@@ -95,6 +133,11 @@
+ 
+ void waitConditionVariable(TFConditionVariable* pCv, TFMutex* mutex, uint32_t ms)
+ {
++    MTRACY_ZONE_COLOR("Condition wait", 0xBA7B44);
++    MTRACY_VALUE(ms);
++#ifdef TRACY_ENABLE
++    TracyCLockAfterUnlock(mutex->pTracyLock);
++#endif
+     pthread_mutex_t* mutexHandle = (pthread_mutex_t*)&mutex->pHandle;
+ 
+     if (ms == TIMEOUT_INFINITE)
+@@ -109,6 +152,10 @@
+ 
+         pthread_cond_timedwait_relative_np(&pCv->pHandle, mutexHandle, &time);
+     }
++#ifdef TRACY_ENABLE
++    if (___tracy_before_lock_lockable_ctx(mutex->pTracyLock))
++        TracyCLockAfterLock(mutex->pTracyLock);
++#endif
+ }
+ 
+ void wakeOneConditionVariable(TFConditionVariable* pCv) { pthread_cond_signal(&pCv->pHandle); }
+@@ -124,17 +171,29 @@
+       pthread_setschedparam(pHandle, SCHED_OTHER, &param);
+ }*/
+ 
+-void setMainThread(void) { mainThreadID = getCurrentThreadID(); }
++void setMainThread(void)
++{
++    mainThreadID = getCurrentThreadID();
++#ifdef TRACY_ENABLE
++    ___tracy_set_thread_name("Main / AppKit");
++#endif
++}
+ 
+ ThreadID getCurrentThreadID(void) { return getCurrentPthreadID(); }
+ 
+ void getCurrentThreadName(char* buffer, int buffer_size) { pthread_getname_np(pthread_self(), buffer, buffer_size); }
+ 
+-void setCurrentThreadName(const char* name) { pthread_setname_np(name); }
++void setCurrentThreadName(const char* name)
++{
++    pthread_setname_np(name);
++#ifdef TRACY_ENABLE
++    ___tracy_set_thread_name(name);
++#endif
++}
+ 
+ bool isMainThread(void) { return getCurrentThreadID() == mainThreadID; }
+ 
+-void threadSleep(unsigned mSec) { usleep(mSec * 1000); }
++void threadSleep(unsigned mSec) { MTRACY_ZONE("Thread sleep"); MTRACY_VALUE(mSec); usleep(mSec * 1000); }
+ 
+ // threading class (Static functions)
+ unsigned int getNumCPUCores(void)
+@@ -172,7 +231,7 @@
+     return res == 0;
+ }
+ 
+-void joinThread(ThreadHandle handle) { pthread_join(handle, NULL); }
++void joinThread(ThreadHandle handle) { MTRACY_ZONE("Thread join"); pthread_join(handle, NULL); }
+ 
+ void detachThread(ThreadHandle handle) { pthread_detach(handle); }
+ 
+--- a/Common_3/OS/Darwin/macOSAppDelegate.m
++++ b/Common_3/OS/Darwin/macOSAppDelegate.m
+@@ -47,7 +47,7 @@
+ @implementation AppDelegate
+ {
+     GameController* myController;
+-    void (^drawBlock)(void);
++    dispatch_source_t renderTimer;
+ }
+ 
+ - (void)drawFunc
+@@ -55,7 +55,6 @@
+     @autoreleasepool
+     {
+         [myController draw];
+-        drawBlock();
+     }
+ }
+ 
+@@ -71,13 +70,13 @@
+ 
+ #ifdef DISPATCH_APPROACH
+     __weak AppDelegate* weakSelf = self;
+-    drawBlock = ^{
+-        dispatch_async(dispatch_get_main_queue(), ^{
+-            [weakSelf drawFunc];
+-        });
+-    };
+-
+-    drawBlock();
++    renderTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
++    // Benchmarks remove the playback cap; the main queue still services UI events.
++    BOOL benchmark = [[[NSProcessInfo processInfo] arguments] containsObject:@"--benchmark-unthrottled"];
++    dispatch_source_set_timer(renderTimer, dispatch_time(DISPATCH_TIME_NOW, 0),
++                              benchmark ? NSEC_PER_MSEC : NSEC_PER_SEC / 30, benchmark ? 0 : NSEC_PER_MSEC);
++    dispatch_source_set_event_handler(renderTimer, ^{ [weakSelf drawFunc]; });
++    dispatch_resume(renderTimer);
+ #endif
+ 
+ #ifdef LOOP_IN_FINISH_LAUNCHING
+@@ -98,6 +97,7 @@
+ 
+ - (void)applicationWillTerminate:(NSNotification*)aNotification
+ {
++    if (renderTimer) dispatch_source_cancel(renderTimer);
+     if (systemSleepAssertionID > 0)
+     {
+         IOPMAssertionRelease(systemSleepAssertionID);
+--- a/Common_3/OS/Darwin/iOSBase.mm
++++ b/Common_3/OS/Darwin/iOSBase.mm
+@@ -40,7 +40,7 @@
+ #include "../../Application/Interfaces/IUI.h"
+ #include "../../Game/Interfaces/IScripting.h"
+ #include "../../Graphics/Interfaces/IGraphics.h"
+-#include "../../Utilities/Interfaces/TFIFileSystem.h"
++#include "../../Utilities/Interfaces/IFileSystem.h"
+ #include "../../Utilities/Interfaces/ILog.h"
+ #include "../../Utilities/Interfaces/IThread.h"
+ #include "../../Utilities/Interfaces/ITime.h"
+@@ -50,7 +50,7 @@
+ #if defined(ENABLE_FORGE_RELOAD_SHADER)
+ #include "../../Tools/ReloadServer/ReloadClient.h"
+ #endif
+-#include "../../Utilities/Math/MathTypes.h"
++#include "../../Utilities/Interfaces/IMath.h"
+ 
+ #import "iOSAppDelegate.h"
+ 
+--- a/Common_3/OS/Darwin/macOSBase.mm
++++ b/Common_3/OS/Darwin/macOSBase.mm
+@@ -23,6 +23,7 @@
+  */
+ 
+ #include "../../Application/Config.h"
++#import "macOSAppDelegate.h"
+ 
+ #ifdef __APPLE__
+ 
+@@ -40,7 +41,7 @@
+ #include "../../Application/Interfaces/IUI.h"
+ #include "../../Game/Interfaces/IScripting.h"
+ #include "../../Graphics/Interfaces/IGraphics.h"
+-#include "../../Utilities/Interfaces/TFIFileSystem.h"
++#include "../../Utilities/Interfaces/IFileSystem.h"
+ #include "../../Utilities/Interfaces/ILog.h"
+ #include "../../Utilities/Interfaces/IThread.h"
+ #include "../../Utilities/Interfaces/ITime.h"
+@@ -51,7 +52,7 @@
+ #if defined(ENABLE_FORGE_RELOAD_SHADER)
+ #include "../../Tools/ReloadServer/ReloadClient.h"
+ #endif
+-#include "../../Utilities/Math/MathTypes.h"
++#include "../../Utilities/Interfaces/IMath.h"
+ 
+ #include "../../Utilities/Interfaces/IMemory.h"
+ 
+@@ -65,7 +66,7 @@
+ TFWindowDesc                    gCurrentWindow;
+ extern CustomMessageProcessor sCustomProc;
+ 
+-static TFReloadDesc gReloadDescriptor = { RELOAD_TYPE_ALL };
++static TFReloadDesc gReloadDescriptor = { (TFReloadType)(TF_RELOAD_TYPE_RESIZE | TF_RELOAD_TYPE_SHADER | TF_RELOAD_TYPE_RENDERTARGET) };
+ static bool       gShowPlatformUI = true;
+ static bool       gBaseSubsystemAppDrawn = false;
+ 
+@@ -78,7 +79,7 @@
+ extern float (*gDPIScales)[2];
+ 
+ /// VSync Toggle
+-static UIComponent* pToggleVSyncWindow = NULL;
++
+ #if defined(ENABLE_FORGE_RELOAD_SHADER)
+ static UIComponent* pReloadShaderComponent = NULL;
+ #endif
+@@ -227,6 +228,7 @@
+ 
+ bool initBaseSubsystems()
+ {
++    MTRACY_ZONE("initBaseSubsystems");
+     // Not exposed in the interface files / app layer
+     extern bool platformInitFontSystem();
+     extern bool platformInitUserInterface();
+@@ -291,6 +293,7 @@
+ 
+ void exitBaseSubsystems()
+ {
++    MTRACY_ZONE("exitBaseSubsystems");
+     // Not exposed in the interface files / app layer
+     extern void platformExitFontSystem();
+     extern void platformExitUserInterface();
+@@ -321,63 +324,15 @@
+ 
+ void setupPlatformUI(int32_t width, int32_t height)
+ {
+-#ifdef ENABLE_FORGE_UI
+-
+-    // WINDOW AND RESOLUTION CONTROL
+-    extern void platformSetupWindowSystemUI(IApp*);
+-    platformSetupWindowSystemUI(pApp);
+-
+-    // VSYNC CONTROL
+-    UIComponentDesc UIComponentDesc = {};
+-    UIComponentDesc.mStartPosition = vec2(width * 0.4f, height * 0.90f);
+-    uiAddComponent("VSync Control", &UIComponentDesc, &pToggleVSyncWindow);
+-
+-    CheckboxWidget checkbox;
+-    checkbox.pData = &pApp->mSettings.mVSyncEnabled;
+-    TFUIWidget* pCheckbox = uiAddComponentWidget(pToggleVSyncWindow, "Toggle VSync\t\t\t\t\t", &checkbox, TF_WIDGET_TYPE_CHECKBOX);
+-    REGISTER_LUA_WIDGET(pCheckbox);
+-
+-#if defined(ENABLE_FORGE_RELOAD_SHADER)
+-    // RELOAD CONTROL
+-    UIComponentDesc = {};
+-    UIComponentDesc.mStartPosition = vec2(width * 0.6f, height * 0.90f);
+-    uiAddComponent("Reload Control", &UIComponentDesc, &pReloadShaderComponent);
+-    platformSetupReloadClientUI(pReloadShaderComponent);
+-#endif
+-
+-    // MICROPROFILER UI
+-    toggleProfilerMenuUI(true);
+-
+-#endif
+-
+-#if defined(ENABLE_FORGE_SCRIPTING) && defined(AUTOMATED_TESTING)
+-// Tests below are executed last, after tests registered in IApp::Init have executed
+-#if 0 // For now we don't have any tests that require running after UT tests for this platform
+-	const char* sLastTestScripts[] = { "" };
+-	const uint32_t numScripts = sizeof(sLastTestScripts) / sizeof(sLastTestScripts[0]);
+-	LuaScriptDesc scriptDescs[numScripts] = {};
+-	for (uint32_t i = 0; i < numScripts; ++i)
+-	{
+-		scriptDescs[i].pScriptFileName = sLastTestScripts[i];
+-	}
+-	luaDefineScripts(scriptDescs, numScripts);
+-#endif
+-#endif
++    UNREF_PARAM(width); UNREF_PARAM(height);
++    // App owns its minimal UI. Platform diagnostics stay opt-in.
++    toggleProfilerMenuUI(false);
+ }
+ 
+ void togglePlatformUI()
+ {
+     gShowPlatformUI = pApp->mSettings.mShowPlatformUI;
+-
+-#ifdef ENABLE_FORGE_UI
+-    extern void platformToggleWindowSystemUI(bool);
+-    platformToggleWindowSystemUI(gShowPlatformUI);
+-
+-    uiSetComponentActive(pToggleVSyncWindow, gShowPlatformUI);
+-#if defined(ENABLE_FORGE_RELOAD_SHADER)
+-    uiSetComponentActive(pReloadShaderComponent, gShowPlatformUI);
+-#endif
+-#endif
++    toggleProfilerMenuUI(gShowPlatformUI);
+ }
+ 
+ //------------------------------------------------------------------------
+@@ -405,7 +360,26 @@
+         return 0;
+     }
+ 
+-    return NSApplicationMain(argc, argv);
++    IApp::argc = argc;
++    IApp::argv = argv;
++    @autoreleasepool
++    {
++        ForgeApplication* application = [ForgeApplication sharedApplication];
++        AppDelegate* delegate = [[AppDelegate alloc] init];
++        application.delegate = delegate;
++        [application setActivationPolicy:NSApplicationActivationPolicyRegular];
++        NSMenu* menu = [[NSMenu alloc] init];
++        NSMenuItem* item = [[NSMenuItem alloc] init];
++        [menu addItem:item];
++        NSMenu* appMenu = [[NSMenu alloc] init];
++        [appMenu addItemWithTitle:@"Quit Mooring Simulator" action:@selector(terminate:) keyEquivalent:@"q"];
++        item.submenu = appMenu;
++        application.mainMenu = menu;
++        [application activateIgnoringOtherApps:YES];
++        [application run];
++        application.delegate = nil;
++    }
++    return 0;
+ }
+ 
+ // Interface that controls the main updating/rendering loop on Metal appplications.
+@@ -746,12 +720,12 @@
+     updateBaseSubsystems(deltaTime, gBaseSubsystemAppDrawn);
+     gBaseSubsystemAppDrawn = false;
+ 
+-    if (gReloadDescriptor.mType != RELOAD_TYPE_ALL)
++    if (gReloadDescriptor.mType != (TFReloadType)(TF_RELOAD_TYPE_RESIZE | TF_RELOAD_TYPE_SHADER | TF_RELOAD_TYPE_RENDERTARGET))
+     {
+         pApp->Unload(&gReloadDescriptor);
+         pApp->Load(&gReloadDescriptor);
+ 
+-        gReloadDescriptor.mType = RELOAD_TYPE_ALL;
++        gReloadDescriptor.mType = (TFReloadType)(TF_RELOAD_TYPE_RESIZE | TF_RELOAD_TYPE_SHADER | TF_RELOAD_TYPE_RENDERTARGET);
+         return;
+     }
+ 
+@@ -759,6 +733,8 @@
+     pApp->Update(deltaTime);
+ 
+     pApp->Draw();
++    ++pApp->mSettings.mFrames;
++    pApp->mSettings.mFrameIdx = pApp->mSettings.mFrames % pApp->mSettings.mFrameMaxCount;
+     gBaseSubsystemAppDrawn = true;
+ 
+     if (gShowPlatformUI != pApp->mSettings.mShowPlatformUI)
+@@ -812,7 +788,7 @@
+ #endif
+ 
+     pApp->mSettings.mQuit = true;
+-    gReloadDescriptor.mType = RELOAD_TYPE_ALL;
++    gReloadDescriptor.mType = (TFReloadType)(TF_RELOAD_TYPE_RESIZE | TF_RELOAD_TYPE_SHADER | TF_RELOAD_TYPE_RENDERTARGET);
+     pApp->Unload(&gReloadDescriptor);
+     pApp->Exit();
+ 
+--- a/Common_3/OS/Darwin/macOSWindow.mm
++++ b/Common_3/OS/Darwin/macOSWindow.mm
+@@ -40,7 +40,7 @@
+ #include "../Interfaces/IOperatingSystem.h"
+ 
+ #include "../../Graphics/Interfaces/IGraphicsConfig.h"
+-#include "../../Utilities/Math/MathTypes.h"
++#include "../../Utilities/Interfaces/IMath.h"
+ 
+ #define RECOMMENDED_WINDOW_SIZE_DESIRED_FRACTION     0.75
+ #define RECOMMENDED_WINDOW_SIZE_MIN_DESIRED_FRACTION 0.75
+@@ -427,6 +427,68 @@
+ - (void)mouseEntered:(NSEvent*)nsEvent
+ {
+     gCursorInsideTrackingArea = true;
++    [self recordPointer:nsEvent];
++}
++
++- (void)recordPointer:(NSEvent*)event
++{
++    extern void platformMousePosition(float, float);
++    NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
++    CGFloat scale = self.window.backingScaleFactor;
++    platformMousePosition(point.x * scale, (self.bounds.size.height - point.y) * scale);
++}
++- (void)mouseMoved:(NSEvent*)event { [self recordPointer:event]; }
++- (void)mouseDragged:(NSEvent*)event { [self recordPointer:event]; }
++- (void)rightMouseDragged:(NSEvent*)event { [self recordPointer:event]; }
++- (void)otherMouseDragged:(NSEvent*)event { [self recordPointer:event]; }
++- (BOOL)acceptsFirstMouse:(NSEvent*)event { return YES; }
++- (void)mouseDown:(NSEvent*)event
++{
++    [self recordPointer:event];
++    extern void platformMouseButton(unsigned, bool);
++    platformMouseButton(0, true);
++}
++- (void)mouseUp:(NSEvent*)event
++{
++    [self recordPointer:event];
++    extern void platformMouseButton(unsigned, bool);
++    platformMouseButton(0, false);
++}
++- (void)rightMouseDown:(NSEvent*)event
++{
++    [self recordPointer:event];
++    extern void platformMouseButton(unsigned, bool);
++    platformMouseButton(1, true);
++}
++- (void)rightMouseUp:(NSEvent*)event
++{
++    [self recordPointer:event];
++    extern void platformMouseButton(unsigned, bool);
++    platformMouseButton(1, false);
++}
++- (void)otherMouseDown:(NSEvent*)event
++{
++    [self recordPointer:event];
++    extern void platformMouseButton(unsigned, bool);
++    platformMouseButton(2, true);
++}
++- (void)otherMouseUp:(NSEvent*)event
++{
++    [self recordPointer:event];
++    extern void platformMouseButton(unsigned, bool);
++    platformMouseButton(2, false);
++}
++- (void)scrollWheel:(NSEvent*)event
++{
++    [self recordPointer:event];
++    extern void platformMouseScroll(float);
++    platformMouseScroll((float)event.scrollingDeltaY);
++}
++- (void)magnifyWithEvent:(NSEvent*)event
++{
++    [self recordPointer:event];
++    extern void platformMouseScroll(float);
++    platformMouseScroll((float)event.magnification * 10.0f);
+ }
+ 
+ - (void)mouseExited:(NSEvent*)nsEvent
+@@ -436,6 +498,8 @@
+ 
+ - (void)keyDown:(NSEvent*)nsEvent
+ {
++    extern void platformKeyButton(unsigned, bool);
++    platformKeyButton(nsEvent.keyCode, true);
+     extern void platformKeyChar(char32_t c);
+     // if using characters and we have modifiers such as ctrl where it shouldn't print text
+     // we won't have any input in characters string but it will be in charactersIgnoringModifiers
+@@ -452,6 +516,8 @@
+ 
+ - (void)keyUp:(NSEvent*)nsEvent
+ {
++    extern void platformKeyButton(unsigned, bool);
++    platformKeyButton(nsEvent.keyCode, false);
+ }
+ 
+ // Helps with performance
+@@ -875,6 +941,7 @@
+ 
+     [view addTrackingArea:trackingArea];
+     [window makeFirstResponder:view];
++    [window setAcceptsMouseMovedEvents:YES];
+ 
+     [window setAcceptsMouseMovedEvents:YES];
+     [window setTitle:[NSString stringWithUTF8String:app_name]];
+--- a/Common_3/Graphics/FSL/metal_srt.h
++++ b/Common_3/Graphics/FSL/metal_srt.h
+@@ -82,13 +82,13 @@
+ #define SRT_SET_DESC(srt, freq, maxSets, nodeIndex)                                                                                 \
+     {                                                                                                                               \
+         (offsetof(SRT_##srt, p##freq) / ((uint32_t)(sizeof(TFMetalDescriptorSet)))), (maxSets), (nodeIndex),                          \
+-            (sizeof(SRT_##srt::freq) / sizeof(TFDescriptor)), SRT_##srt::freq##Ptr(), 0, getSrt##srt##Ptr(), SRT_SET_COUNT(SRT_##srt) \
++            (sizeof(SRT_##srt::freq) / sizeof(TFDescriptor)), SRT_##srt::freq##Ptr(), SET_##freq, 0, getSrt##srt##Ptr(), SRT_SET_COUNT(SRT_##srt) \
+     }
+ 
+ #define SRT_SET_DESC_LARGE_RW(srt, freq, maxSets, nodeIndex)                                                                        \
+     {                                                                                                                               \
+         (offsetof(SRT_##srt, p##freq) / ((uint32_t)(sizeof(TFMetalDescriptorSet)))), (maxSets), (nodeIndex),                          \
+-            (sizeof(SRT_##srt::freq) / sizeof(TFDescriptor)), SRT_##srt::freq##Ptr(), 1, getSrt##srt##Ptr(), SRT_SET_COUNT(SRT_##srt) \
++            (sizeof(SRT_##srt::freq) / sizeof(TFDescriptor)), SRT_##srt::freq##Ptr(), SET_##freq, 1, getSrt##srt##Ptr(), SRT_SET_COUNT(SRT_##srt) \
+     }
+ 
+ #define IS_AB_RES(is_ab) (is_ab & (isParamsOnly() ? 0u : 1u))
+--- a/Common_3/Graphics/ThirdParty/OpenSource/VulkanMemoryAllocator/TFVulkanMemoryAllocatorConfig.h
++++ b/Common_3/Graphics/ThirdParty/OpenSource/VulkanMemoryAllocator/TFVulkanMemoryAllocatorConfig.h
+@@ -73,7 +73,7 @@
+ 	void Unlock() { releaseMutex(&mMutex); }
+ 	bool TryLock() { return tryAcquireMutex(&mMutex); }
+ 
+-	Mutex mMutex;
++	TFMutex mMutex;
+ };
+ 
+ #define VMA_MUTEX TFVmaMutex
+@@ -97,7 +97,7 @@
+ 	void UnlockWrite() { releaseMutex(&mMutex); }
+ 	bool TryLockWrite() { return tryAcquireMutex(&mMutex); }
+ 	
+-	Mutex mMutex;
++	TFMutex mMutex;
+ };
+ 
+ #define VMA_RW_MUTEX TFVmaRWMutex
+--- a/Common_3/Tools/ForgeShadingLanguage/generators/metal.py
++++ b/Common_3/Tools/ForgeShadingLanguage/generators/metal.py
+@@ -77,7 +77,7 @@
+     shader_src += ['#include "includes/metal.h"\n']
+ 
+ 
+-    ids = [4,0,0]
++    ids = [6,0,0]
+ 
+     def consumeIdAt(i, inc):
+         val = ids[i]
+@@ -147,6 +147,9 @@
+ 
+         if '{' in line: global_scope_count += 1
+         if '}' in line: global_scope_count -= 1
++
++        if '_MAIN(' in line:
++            parsing_main = True
+ 
+         if global_scope_count == 0: continue
+ 
+@@ -181,17 +184,13 @@
+         if not parsing_main:
+             global_references_tmp = list(global_references.items())
+             for fn, resource in global_references_tmp:
+-                l_call = line.find(fn+'(')
+-                if l_call > 0:
++                if re.search(r'(?<![\w.])' + re.escape(fn) + r'\s*\(', line):
+                     for fn_caller, (_, fn_i) in reversed_fns:
+                         if fn_i[0] < i:
+                             if fn_caller not in global_references: global_references[fn_caller] = set()
+                             global_references[fn_caller].update(resource)
+                             break
+ 
+-        if '_MAIN(' in line:
+-            parsing_main = True
+-
+     if shader.waveops_flags != WaveopsFlags.WAVE_OPS_NONE:
+         global_reference_paths['simd_lane_id'] = 'simd_lane_id'
+         global_reference_args['simd_lane_id'] = 'const uint simd_lane_id'
+@@ -212,7 +211,7 @@
+             # make AB declaration only active if any member is defined
+             space = 'constant'
+             ifreq = srt_sets.index(freq)
+-            mainArgs.insert(buffer_index, [space, ' struct ', argBufType, '& ', argBufType, f'[[buffer({buffer_index})]]'])
++            mainArgs.insert(buffer_index, [space, ' struct ', argBufType, '& ', argBufType, f'[[buffer({2 + {"Persistent": 0, "PerFrame": 1, "PerBatch": 2, "PerDraw": 3}[freq]})]]'])
+             mainArgsNames.insert(buffer_index, argBufType)
+             buffer_index = buffer_index + 1
+             ab_decl += ['struct ', argBufType, '\n{\n']
+@@ -602,7 +601,6 @@
+             if line.strip().startswith('//'): continue
+ 
+             # modify signatures
+-            l_call = line.find(fn+'(')
+             if insert_line in line:
+                 for parameter in signature_additions:
+                     if line[insert_loc-1:insert_loc+1] == '()':
+@@ -613,23 +611,16 @@
+                 modified_signature = True
+ 
+             # modify calls
+-            elif modified_signature and l_call > 0 and line[l_call-1] in ' =\t(!':
+-                l2 = line.find(');', l_call)
+-                l2 = 0
+-                counter = 0
+-                for j, c in enumerate(line[l_call+len(fn):]):
+-                    if c == '(':
+-                        counter+=1
+-                        if counter == 1:
+-                            l2 = j+l_call+len(fn)+1
+-                            break
+-                    if c == ')':
+-                        counter-=1
+-                for argument in call_additions:
+-                    if line[l2-1:l2+1] == '()':
+-                        line = line[:l2] + argument + line[l2:]
+-                    else:
+-                        line = line[:l2] + argument + ', ' + line[l2:]
++            elif modified_signature:
++                # Calls can follow any operator, share a line, or contain
++                # whitespace before '('. Insert backwards to retain offsets.
++                calls = list(re.finditer(r'(?<![\w.])' + re.escape(fn) + r'\s*\(', line))
++                for call in reversed(calls):
++                    position = call.end()
++                    arguments = ', '.join(reversed(call_additions))
++                    if not line[position:].lstrip().startswith(')'):
++                        arguments += ', '
++                    line = line[:position] + arguments + line[position:]
+                 shader_src[i] = line
+     
+     # optimization pass for generated code
+--- a/Common_3/Tools/ForgeShadingLanguage/includes/metal.h
++++ b/Common_3/Tools/ForgeShadingLanguage/includes/metal.h
+@@ -417,6 +417,7 @@
+ #define NO_SAMPLER 0u
+ 
+ #define TFBuffer(T) T
++#define Buffer(T) T
+ #define RWBuffer(T) T
+ #define WBuffer(T) T
+ #define RWCoherentBuffer(T) T
+@@ -650,7 +651,7 @@
+ #define PS_ZORDER_EARLYZ()
+ 
+ #ifndef STAGE_VERT
+-    #define VR_VIEW_ID(VID) (0)
++    #define VR_VIEW_ID 0
+ #else
+     #define VR_VIEW_ID 0
+ #endif
+--- /dev/null
++++ b/Common_3/Graphics/Metal/MetalDescriptors.h
+@@ -0,0 +1,69 @@
++// Apple compatibility layer for the explicit view API in Forge 5abcdd9.
++// Included by MetalRenderer.mm after the native types and allocation hooks.
++
++static void metalInitTextureDescriptor(const TFTextureDescriptorDesc* desc, TFTextureDescriptor* view)
++{
++    ASSERT(desc && desc->pTexture);
++    const TFTexture* texture = desc->pTexture;
++    TinyImageFormat format = desc->mFormat == TinyImageFormat_UNDEFINED ? (TinyImageFormat)texture->mFormat : desc->mFormat;
++    MTLPixelFormat metalFormat = (MTLPixelFormat)TinyImageFormat_ToMTLPixelFormat(format);
++    if (desc->mIsStencil)
++    {
++        metalFormat = texture->pTexture.pixelFormat == MTLPixelFormatDepth32Float_Stencil8
++            ? MTLPixelFormatX32_Stencil8 : MTLPixelFormatStencil8;
++    }
++    const uint32_t mipCount = desc->mMipLevelCount ? desc->mMipLevelCount : texture->mMipLevels - desc->mBaseMipLevel;
++    const uint32_t layerCount = desc->mArrayLayerCount ? desc->mArrayLayerCount : texture->mArraySizeMinusOne + 1 - desc->mBaseArrayLayer;
++    ASSERT(mipCount && desc->mBaseMipLevel + mipCount <= texture->mMipLevels);
++    ASSERT(layerCount && desc->mBaseArrayLayer + layerCount <= texture->mArraySizeMinusOne + 1);
++    MTLTextureType type = texture->pTexture.textureType;
++    if ((desc->mDescriptors & TF_DESCRIPTOR_TYPE_RW_TEXTURE) && (type == MTLTextureTypeCube || type == MTLTextureTypeCubeArray))
++        type = MTLTextureType2DArray;
++    view->pSrvUav = [texture->pTexture newTextureViewWithPixelFormat:metalFormat textureType:type
++        levels:NSMakeRange(desc->mBaseMipLevel, mipCount) slices:NSMakeRange(desc->mBaseArrayLayer, layerCount)];
++    view->mFormat = format;
++    ASSERT(view->pSrvUav);
++}
++
++void addTextureDescriptor(TFRenderer* renderer, const TFTextureDescriptorDesc* desc, TFTextureDescriptor** output)
++{
++    UNREF_PARAM(renderer);
++    auto* view = (TFTextureDescriptor*)tf_calloc_memalign(1, alignof(TFTextureDescriptor), sizeof(TFTextureDescriptor));
++    metalInitTextureDescriptor(desc, view);
++    *output = view;
++}
++
++void removeTextureDescriptor(TFRenderer* renderer, TFTextureDescriptor* view)
++{
++    UNREF_PARAM(renderer);
++    view->pSrvUav = nil;
++    tf_free(view);
++}
++
++static void metalInitRenderTargetDescriptor(const TFRenderTargetDescriptorDesc* desc, TFRenderTargetDescriptor* view)
++{
++    ASSERT(desc && desc->pRenderTarget);
++    view->pRenderTarget = desc->pRenderTarget;
++    view->pTexture = desc->pRenderTarget->pTexture->pTexture;
++    view->mMipLevel = desc->mUseMipSlice ? desc->mMipSlice : 0;
++    view->mSlice = desc->mUseArraySlice ? desc->mArraySlice : 0;
++    view->mMipSlice = desc->mMipSlice;
++    view->mArraySlice = desc->mArraySlice;
++    view->mUseMipSlice = desc->mUseMipSlice;
++    view->mUseArraySlice = desc->mUseArraySlice;
++}
++
++void addRenderTargetDescriptor(TFRenderer* renderer, const TFRenderTargetDescriptorDesc* desc, TFRenderTargetDescriptor** output)
++{
++    UNREF_PARAM(renderer);
++    auto* view = (TFRenderTargetDescriptor*)tf_calloc_memalign(1, alignof(TFRenderTargetDescriptor), sizeof(TFRenderTargetDescriptor));
++    metalInitRenderTargetDescriptor(desc, view);
++    *output = view;
++}
++
++void removeRenderTargetDescriptor(TFRenderer* renderer, TFRenderTargetDescriptor* view)
++{
++    UNREF_PARAM(renderer);
++    view->pTexture = nil;
++    tf_free(view);
++}

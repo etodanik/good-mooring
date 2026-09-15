@@ -1,0 +1,59 @@
+#include "Ocean.srt.h"
+NUM_THREADS(8,8,1)
+void CS_MAIN(SV_DispatchThreadID(uint3) id)
+{
+    INIT_MAIN;
+    uint resolution=uint(gOcean.patch.z);
+    float2 world=gOcean.patch.xy+(float2(id.xy)/float(resolution)-.5)*64;
+    float3 field=float3(0,0,0);
+    for(uint i=0;i<uint(gOcean.patch.w);i++)
+    {
+        float4 free=gPackets[i*4], actual=gPackets[i*4+1], directions=gPackets[i*4+2], wave=gPackets[i*4+3];
+        if(wave.w<=0) continue;
+        for(uint counter=0;counter<2;counter++)
+        {
+            float2 center=counter!=0?free.xy:actual.xy, direction=counter!=0?directions.xy:directions.zw;
+            float amplitude=counter!=0?-free.z:actual.z;
+            float2 delta=world-center; float r2=dot(delta,delta)/(wave.z*wave.z);
+            if(r2>=1 || amplitude==0) continue;
+            float remaining=saturate(wave.w-actual.w), life=remaining*remaining*(3-2*remaining);
+            float decay=exp(-.18*actual.w), envelope=(1-r2)*(1-r2)*decay;
+            float phase=wave.x*dot(delta,direction)+free.w;
+            float cosine=cos(phase), sine=sin(phase);
+            float2 gradient=-4*delta/(wave.z*wave.z)*(1-r2)*decay;
+            field+=amplitude*life*float3(envelope*cosine,gradient*cosine-envelope*wave.x*direction*sine);
+        }
+    }
+    for(uint i=0;i<16;i++)
+    {
+        uint base=(gOcean.transform.w+i)*4;
+        float4 position=gPackets[base], forward=gPackets[base+1], velocity=gPackets[base+2], hulls=gPackets[base+3];
+        if(position.w<=0) continue;
+        float2 relative=world-position.xz, side=float2(forward.z,-forward.x);
+        float along=dot(relative,forward.xz), across=dot(relative,side);
+        for(uint hull=0;hull<(hulls.x>0?2u:1u);hull++)
+        {
+            float cross=across+(hull==0?-.5:.5)*hulls.x;
+            float width=velocity.w*.62+.3, crossFactor=exp(-cross*cross/(width*width));
+            if(crossFactor<.00001) continue;
+            for(uint term=0;term<3;term++)
+            {
+                float center=term==0?.40:term==1?0.0:-.46;
+                float span=forward.w*(term==0?.105:term==1?.28:.09);
+                float offset=along-forward.w*center;
+                float height=position.w*(term==0?1.0:term==1?-.1545/.28:.55)*exp(-offset*offset/(span*span))*crossFactor;
+                float da=-2*offset/(span*span)*height, dc=-2*cross/(width*width)*height;
+                field+=float3(height,forward.xz*da+side*dc);
+            }
+        }
+    }
+    float2 relative=world-gOcean.patch.xy;
+    float2 transition=saturate((32-abs(relative))/8);
+    float2 weights=transition*transition*(3-2*transition); float blend=weights.x*weights.y;
+    float2 gradient=-6*transition*(1-transition)/8*sign(relative)*weights.yx;
+    field.yz=field.yz*blend+gradient*field.x;
+    field.x*=blend;
+    float foam=saturate((length(field.yz)-.12)*3);
+    gDestination[id.y*resolution+id.x]=float4(field,foam);
+    RETURN();
+}

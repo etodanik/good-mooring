@@ -1,0 +1,14 @@
+#include "../../../../Graphics/FSL/defaults.h"
+
+#vert FT_MULTIVIEW FT_VDP font.vert
+#include "Font.vert.fsl"
+#end
+
+#frag font.frag
+#include "Font.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW font_3D.frag
+#define FONT_3D
+#include "Font.frag.fsl"
+#end

@@ -1,0 +1,95 @@
+#include "Water.srt.h"
+#include "WaterSampling.h.fsl"
+#include "WaterLighting.h.fsl"
+#include "WaterShadow.h.fsl"
+#include "SkySampling.h.fsl"
+#include "FoamMaterial.h.fsl"
+STRUCT(SprayFragment)
+{
+    DATA(float4, position, SV_Position);
+    DATA(float2, uv, TEXCOORD0);
+    DATA(float4, properties, TEXCOORD1);
+    DATA(float4, normalAge, TEXCOORD2);
+    DATA(float2, coordinate, TEXCOORD3);
+};
+float4 PS_MAIN(SprayFragment input)
+{
+    INIT_MAIN;
+    float radius=dot(input.uv,input.uv);
+    bool froth=input.properties.y==WATER_FROTH, surfaceFoam=input.properties.y==WATER_FOAM || froth;
+    float opacity=saturate(1-radius); opacity*=opacity*input.properties.x;
+    float depth=abs(SampleLvlTex2D(gOpaque,gSamplerPointClamp,input.position.xy/gWater.screen.xy,0).a);
+    float intersection=depth>0?saturate((depth-input.properties.z)/.3):1;
+    float3 normal=normalize(input.normalAge.xyz);
+    float3 ray=cameraRay(input.position.xy/gWater.screen.xy);
+    float3 world=gWater.eye.xyz+ray*input.properties.z;
+    float foamDetail=.5;
+    float4 pattern=float4(0,0,0,0);
+    if(surfaceFoam) pattern=foamPattern(input.coordinate,localFoam(world.xz,false).zw,-normal.xz/max(.2,normal.y));
+    if(surfaceFoam && !froth) {
+        float erosion=input.normalAge.w*.45;
+        float lace=smoothstep(.13+erosion,.55+erosion,pattern.x);
+        float churn=smoothstep(.2+erosion,.65+erosion,pattern.x*.5+pattern.w*.5);
+        float settled=smoothstep(.15,.65,input.normalAge.w);
+        float pores=lerp(.35+.65*pattern.w,.12+.88*smoothstep(.2,.75,pattern.y),settled);
+        opacity*=lerp(churn,lace,settled)*pores*gWater.weather.z;
+        foamDetail=lerp(pattern.w,pattern.y,settled);
+    }
+    if(froth) {
+        // Shared material coordinates continue the wave's foam into its crown.
+        float2 p=(input.coordinate-gWater.current.xz*gWater.screen.z)*5;
+        float3 coarse=waterNoiseGradient(p);
+        float edge=1-radius+(pattern.z-.5)*1.5;
+        // Reuse the sampled wave's foam mass. Optical thickness preserves
+        // porous interiors; a density threshold made every crown a solid blob.
+        float mass=input.properties.w*(1-input.normalAge.w);
+        float coverage=foamChurn(mass,pattern);
+        // A crown thins toward its edge; a hard cutoff exposed its disc mesh.
+        opacity=saturate(edge); opacity*=opacity*coverage;
+        opacity*=input.properties.x*gWater.weather.z;
+        normal=normalize(normal-float3(coarse.y,0,coarse.z)*.18);
+        foamDetail=pattern.w;
+    }
+    if(input.properties.y==WATER_SHEET) {
+        // Resolve a parcel into millimetre-scale droplets, not a handful of
+        // white beads. Blend to area coverage when the grains become subpixel.
+        float2 p=input.uv*18+input.properties.w*31;
+        p+=2*float2(waterNoise(p*.23),waterNoise(p*.23+19.1));
+        float2 cell=floor(p);
+        float2 centre=.2+.6*float2(hashWater(cell),hashWater(cell+17.3));
+        float grainRadius=.08+.22*hashWater(cell+31.7);
+        float distance=length(frac(p)-centre);
+        float footprint=max(length(ddx(p)),length(ddy(p)));
+        float filter=max(.01,footprint*.6);
+        float grains=1-smoothstep(grainRadius-filter,grainRadius+filter,distance);
+        grains=lerp(grains,.126,smoothstep(.35,1.0,footprint));
+        float envelope=saturate(1-radius+(waterNoise(p*.3)-.5)*1.6);
+        envelope*=.35+.65*waterNoise(p*.65);
+        opacity=input.properties.x*envelope*grains;
+    }
+    if(input.properties.y==WATER_MIST) {
+        float2 p=input.uv*3+input.properties.w*31;
+        opacity*=.35+.65*waterNoise(p+waterNoise(p*.5));
+    }
+    float3 color=lerp(float3(.8,.91,.88),float3(.41,.51,.53),gWater.weather.x);
+    if(input.properties.y!=WATER_RAIN) {
+        float shadow=cloudShadow(world,gWater.weather.x,gWater.screen.z,0,gWater.sun.xyz)*sunTransmission(gWater.weather.x);
+        shadow*=shadowWater(world)*shadowWave(world,surfaceFoam?normal:float3(0,1,0));
+        if(surfaceFoam) color=shadeFoam(normal,1-input.normalAge.w,foamDetail,shadow);
+        // Backlit droplets scatter more light; nearby crests and hulls occlude it.
+        else color=color*.75+float3(1,.9,.72)*shadow*(.18+1.8*waterPhase(dot(normalize(ray),gWater.sun.xyz),.65));
+    }
+    if(gWater.effects.w==0) {
+        float fog=waterFog(input.properties.z*length(ray),gWater.weather.y);
+        color=lerp(color,sampleSky(normalize(ray),uint(gWater.surface.x)*2).rgb,fog);
+    }
+    opacity*=intersection*(input.properties.y==WATER_RAIN?.25:input.properties.y==WATER_MIST?.075:surfaceFoam?.9:.65);
+    if(gWater.effects.w>0) {
+        bool visible=(gWater.effects.w==18 && input.properties.y!=WATER_RAIN) || (gWater.effects.w==19 && input.properties.y==WATER_RAIN);
+        visible=visible || (gWater.effects.w==38 && (input.properties.y==WATER_DROPLET || input.properties.y==WATER_SHEET));
+        visible=visible || (gWater.effects.w==39 && surfaceFoam) || (gWater.effects.w==40 && input.properties.y==WATER_MIST);
+        if(!visible) opacity=0;
+        if(gWater.effects.w==18) color=froth?float3(1,.1,.6):surfaceFoam?float3(.2,1,.6):input.properties.y==WATER_SHEET?float3(.1,.7,1):input.properties.y==WATER_MIST?float3(1,.5,.1):float3(1,1,1);
+    }
+    RETURN(float4(color*opacity,opacity));
+}

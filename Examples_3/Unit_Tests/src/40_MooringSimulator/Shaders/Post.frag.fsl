@@ -1,0 +1,177 @@
+#include "Post.srt.h"
+#include "WaterLighting.h.fsl"
+#include "SkySampling.h.fsl"
+STRUCT(PostFragment)
+{
+    DATA(float4, position, SV_Position);
+    DATA(float2, uv, TEXCOORD0);
+};
+float3 atmosphericRays(float2 uv,float depth)
+{
+    if(gPost.quality.y==0 || gPost.effects.x==0) return float3(0,0,0);
+    float3 direction=normalize(gPost.forward.xyz+gPost.right.xyz*(uv.x*2-1)+gPost.up.xyz*(1-uv.y*2));
+    // Integrate the air below the cloud layer. A 240 m cap never reached the
+    // cloud shadows at a low sun angle, reducing shafts to an unoccluded glow.
+    float rayLength=direction.y>.001?min(8000.0,max(0.0,(cloudLayer(gPost.weather.x).x-gPost.eye.y)/direction.y)):8000.0;
+    if(depth>0) rayLength=min(rayLength,depth/max(.1,dot(direction,gPost.forward.xyz)));
+    // Quarter-resolution integration affords four times the ray samples.
+    uint steps=uint(gPost.quality.y)*4; float integral=0;
+    float extinction=.0004+gPost.weather.y*.0012;
+    float mass=1-exp(-extinction*rayLength);
+    float jitter=hashWater(uv*gPost.screen.xy);
+    for(uint i=0;i<steps;i++)
+    {
+        float t=-log(max(.0001,1-(float(i)+jitter)/float(steps)*mass))/extinction;
+        float3 world=gPost.eye.xyz+direction*t;
+        float4 shadowClip=mul(gPost.shadowMatrix,float4(world,1));
+        float2 suv=shadowClip.xy*float2(.5,-.5)+.5;
+        float visibility=1;
+        if(all(suv>0) && all(suv<1)) visibility=shadowClip.z-.00035<=SampleLvlTex2D(gPostShadow,gSamplerPointClamp,suv,0).r?1.0:0.0;
+        integral+=visibility*cloudShadow(world,gPost.weather.x,gPost.screen.w,t*2/gPost.screen.y,gPost.sun.xyz)*mass/float(steps);
+    }
+    return float3(1,.87,.64)*integral*waterPhase(dot(direction,gPost.sun.xyz),.7)*gPost.effects.x*sunTransmission(gPost.weather.x);
+}
+float3 bloomColor(float2 uv)
+{
+    float3 bloom=float3(0,0,0);
+    if(gPost.bloom.x>0) {
+        bloom=SampleLvlTex2D(gBloomNear,gSceneSampler,uv,0).rgb*.6;
+        bloom+=SampleLvlTex2D(gBloomMiddle,gSceneSampler,uv,0).rgb*.3;
+        bloom+=SampleLvlTex2D(gBloomFar,gSceneSampler,uv,0).rgb*.1;
+    }
+    return bloom*gPost.bloom.x;
+}
+float3 postColor(float2 uv,float3 lighting)
+{
+    float3 color=SampleLvlTex2D(gSceneColor,gSceneSampler,uv,0).rgb;
+    if(gPost.effects.w>0) return color;
+    return filmicWater(color*gPost.effects.y+lighting);
+}
+float3 bloomSample(float2 uv)
+{
+    float3 color=SampleLvlTex2D(gSceneColor,gSceneSampler,uv,0).rgb;
+    if(gPost.screen.z==3) {
+        color*=gPost.effects.y;
+        float brightness=max(color.r,max(color.g,color.b));
+        float knee=max(.01,gPost.bloom.y*.5);
+        float soft=clamp(brightness-gPost.bloom.y+knee,0.0,2*knee);
+        soft=soft*soft/(4*knee);
+        color*=max(soft,brightness-gPost.bloom.y)/max(.0001,brightness);
+    }
+    return color;
+}
+float3 filteredAirRays(float2 uv,float depth)
+{
+    if(gPost.quality.y==0 || gPost.effects.x==0 || (gPost.effects.w>0 && gPost.effects.w!=20)) return float3(0,0,0);
+    float2 size=ceil(gPost.screen.xy*.25), pixel=uv*size-.5, base=floor(pixel);
+    float3 sum=float3(0,0,0); float weights=0;
+    // Tent filtering suppresses integration noise. View depth keeps light on
+    // its side of a hull silhouette instead of leaking through the foreground.
+    for(int y=-1;y<=2;y++) for(int x=-1;x<=2;x++)
+    {
+        float2 at=base+float2(x,y), distance=abs(at-pixel);
+        float4 sample=SampleLvlTex2D(gAirRays,gSamplerPointClamp,(at+.5)/size,0);
+        if((sample.a==0)!=(depth==0)) continue;
+        float weight=(2-distance.x)*(2-distance.y)*exp(-abs(sample.a-depth)/max(.3,depth*.03));
+        sum+=sample.rgb*weight; weights+=weight;
+    }
+    // A steep horizon can have no matching coarse depth. Trace that rare
+    // pixel directly instead of leaving a black line at the water boundary.
+    return weights>1e-10?sum/weights:atmosphericRays(uv,depth);
+}
+float4 PS_MAIN(PostFragment input)
+{
+    INIT_MAIN;
+    if(gPost.screen.z>=3)
+    {
+        // Normalized 13-tap downsample: retain small highlights without
+        // assigning all their energy to a single coarse texel.
+        float2 p=gPost.bloom.zw;
+        float3 result=bloomSample(input.uv)*.125;
+        for(int y=-1;y<=1;y+=2) for(int x=-1;x<=1;x+=2) {
+            result+=bloomSample(input.uv+float2(x,y)*p)*.125;
+            result+=bloomSample(input.uv+float2(x,y)*p*2)*.03125;
+        }
+        for(int side=-1;side<=1;side+=2) {
+            result+=bloomSample(input.uv+float2(side*2,0)*p)*.0625;
+            result+=bloomSample(input.uv+float2(0,side*2)*p)*.0625;
+        }
+        RETURN(float4(result,0));
+    }
+    if(gPost.screen.z==0)
+    {
+        float4 scene=SampleLvlTex2D(gSceneColor,gSceneSampler,input.uv,0);
+        if(scene.a!=0)
+        {
+            RETURN(float4(scene.rgb,abs(scene.a)));
+        }
+        float3 direction=normalize(gPost.forward.xyz+gPost.right.xyz*(input.uv.x*2-1)+gPost.up.xyz*(1-input.uv.y*2));
+        float4 environment=sampleSky(direction,uint(gPost.forward.w));
+        float3 sky=environment.rgb+float3(1,.77,.42)*smoothstep(.999984,.999991,dot(direction,gPost.sun.xyz))*6*sunTransmission(gPost.weather.x)*(1-environment.a);
+        if(gPost.effects.w>0 && gPost.effects.w!=37) sky=float3(0,0,0);
+        RETURN(float4(sky,0));
+    }
+    // FXAA in display-referred linear light; UI is drawn after this pass.
+    float2 pixel=1/gPost.screen.xy;
+    float depth=SampleLvlTex2D(gSceneColor,gSamplerPointClamp,input.uv,0).a;
+    if(gPost.screen.z==2)
+    {
+        RETURN(float4(atmosphericRays(input.uv,depth),depth));
+    }
+    if(gPost.effects.w==30)
+    {
+        float2 noise=SampleLvlTex3D(gCloudNoiseTexture,gSamplerTrilinearWrap,float3(input.uv,.37),0).rg;
+        RETURN(float4(noise,0,1));
+    }
+    if(gPost.effects.w==31)
+    {
+        float3 world=float3((input.uv.x-.5)*10000,(1-input.uv.y)*4000,0);
+        float density=cloudDensity(world,gPost.weather.x,gPost.screen.w,0);
+        RETURN(float4(density,density,density,1));
+    }
+    float3 rays=filteredAirRays(input.uv,depth);
+    if(gPost.effects.w==24 || gPost.effects.w==25)
+    {
+        float3 direction=normalize(gPost.forward.xyz+gPost.right.xyz*(input.uv.x*2-1)+gPost.up.xyz*(1-input.uv.y*2));
+        float4 environment=sampleSky(direction,uint(gPost.forward.w));
+        RETURN(float4(gPost.effects.w==24?environment.rgb:float3(environment.a,environment.a,environment.a),1));
+    }
+    if(gPost.effects.w==20)
+    {
+        RETURN(float4(rays*6,1));
+    }
+    if(gPost.effects.w==37)
+    {
+        RETURN(float4(filmicWater(bloomColor(input.uv)),1));
+    }
+    // Coarse lighting is smooth across the short FXAA search. Reuse it for
+    // every tap instead of fetching the three bloom levels nine times.
+    float3 lighting=rays*gPost.effects.y+bloomColor(input.uv);
+    float3 c=postColor(input.uv,lighting);
+    if(gPost.effects.w>0 || gPost.quality.w==0)
+    {
+        RETURN(float4(c,1));
+    }
+    float3 nw=postColor(input.uv-pixel,lighting);
+    float3 ne=postColor(input.uv+pixel*float2(1,-1),lighting);
+    float3 sw=postColor(input.uv+pixel*float2(-1,1),lighting);
+    float3 se=postColor(input.uv+pixel,lighting);
+    float3 luma=float3(.299,.587,.114);
+    float a=dot(nw,luma), b=dot(ne,luma), d=dot(sw,luma), e=dot(se,luma), m=dot(c,luma);
+    float low=min(m,min(min(a,b),min(d,e))), high=max(m,max(max(a,b),max(d,e)));
+    if(high-low<max(.025,high*.1))
+    {
+        RETURN(float4(c,1));
+    }
+    float2 direction=float2(-((a+b)-(d+e)),(a+d)-(b+e));
+    float reduce=max((a+b+d+e)*.03125,.0078125);
+    direction=clamp(direction/(min(abs(direction.x),abs(direction.y))+reduce),float2(-8,-8),float2(8,8))*pixel;
+    float3 innerA=postColor(input.uv-direction/6,lighting);
+    float3 innerB=postColor(input.uv+direction/6,lighting);
+    float3 inner=(innerA+innerB)*.5;
+    float3 outerA=postColor(input.uv-direction*.5,lighting);
+    float3 outerB=postColor(input.uv+direction*.5,lighting);
+    float3 outer=inner*.5+(outerA+outerB)*.25;
+    float l=dot(outer,luma);
+    RETURN(float4(l<low || l>high?inner:outer,1));
+}

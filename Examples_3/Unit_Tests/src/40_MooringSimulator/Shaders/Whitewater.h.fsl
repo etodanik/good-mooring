@@ -1,0 +1,23 @@
+// Transport these moments with foam concentration, using the same backtrace
+// and filter. Dividing after filtering preserves age and depth at patch edges.
+// x: foam concentration * age (s), y: entrained air, z: air * depth (m),
+// w: active breaking. Old foam must never become a new spray emitter.
+float4 evolveWhitewater(float density,float4 previous,float source,float plunge,float dt,float decay,float production,out(float) foam)
+{
+    source=saturate(source);
+    float survival=exp(-decay*dt);
+    float retained=max(0.0,density)*survival;
+    float born=(1-saturate(retained))*(1-exp(-source*dt*production));
+    foam=saturate(retained+born);
+    float age=(previous.x+max(0.0,density)*dt)*survival;
+    age*=foam/max(.00001,retained+born);
+    float depth=previous.z/max(.00001,previous.y);
+    // Bubbles rise and dissolve; energetic overturning mixes them deeper.
+    // This is a bounded column model, not a resolved multiphase fluid solver.
+    float airSurvival=exp(-dt*(.45+.18/max(.08,depth)));
+    float oldAir=max(0.0,previous.y)*airSurvival;
+    float newAir=source*dt*.85;
+    float air=oldAir+newAir;
+    float depthMoment=oldAir*max(0.0,depth-.22*dt)+newAir*clamp(.18+plunge*.22,.18,1.5);
+    return float4(min(age,foam*30),min(air,2.0),depthMoment*min(1.0,2/max(.00001,air)),source);
+}

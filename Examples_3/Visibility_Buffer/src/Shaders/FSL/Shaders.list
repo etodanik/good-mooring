@@ -1,0 +1,983 @@
+#include "../../../../../Common_3/Graphics/FSL/defaults.h"
+
+#rootsig default.rootsig
+#end
+
+#rootsig compute.rootsig
+#end
+
+
+#vert shadow_pass.vert
+#include "ShadowPass.vert.fsl"
+#end
+
+#vert shadow_pass_alpha.vert
+#include "ShadowPassAlpha.vert.fsl"
+#end
+
+#frag shadow_pass_alpha.frag
+#include "ShadowPassAlpha.frag.fsl"
+#end
+
+#frag shadow_pass_alpha_atlas.frag
+#define ATLAS_FALLBACK
+#include "ShadowPassAlpha.frag.fsl"
+#end
+
+#vert FT_PRIM_ID FT_MULTIVIEW visibilityBuffer_pass.vert
+#include "VisibilityBufferPass.vert.fsl"
+#end
+
+#vert FT_PRIM_ID FT_MULTIVIEW visibilityBuffer_pass_multiple_mats.vert
+#define HANDLE_MULTIPLE_MATERIALS
+#include "VisibilityBufferPass.vert.fsl"
+#end
+
+#frag FT_PRIM_ID visibilityBuffer_pass.frag
+#include "VisibilityBufferPass.frag.fsl"
+#end
+
+#frag FT_PRIM_ID visibilityBuffer_pass_multiple_mats.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#include "VisibilityBufferPass.frag.fsl"
+#end
+
+#vert FT_MULTIVIEW visibilityBuffer_pass_primid.vert
+#define PRIMID_FALLBACK
+#include "VisibilityBufferPass.vert.fsl"
+#end
+
+#frag visibilityBuffer_pass_primid.frag
+#define PRIMID_FALLBACK
+#include "VisibilityBufferPass.frag.fsl"
+#end
+
+#frag visibilityBuffer_pass_primid_multiple_mats.frag
+#define PRIMID_FALLBACK
+#define HANDLE_MULTIPLE_MATERIALS
+#include "VisibilityBufferPass.frag.fsl"
+#end
+
+#vert FT_PRIM_ID FT_MULTIVIEW visibilityBuffer_pass_alpha.vert
+#include "VisibilityBufferPassAlpha.vert.fsl"
+#end
+
+#vert FT_PRIM_ID FT_MULTIVIEW visibilityBuffer_pass_alpha_multiple_mats.vert
+#define HANDLE_MULTIPLE_MATERIALS
+#include "VisibilityBufferPassAlpha.vert.fsl"
+#end
+
+#vert FT_PRIM_ID FT_MULTIVIEW visibilityBuffer_pass_alpha_atlas.vert
+#define ATLAS_FALLBACK
+#include "VisibilityBufferPassAlpha.vert.fsl"
+#end
+
+#vert FT_PRIM_ID FT_MULTIVIEW visibilityBuffer_pass_alpha_atlas_multiple_mats.vert
+#define ATLAS_FALLBACK
+#define HANDLE_MULTIPLE_MATERIALS
+#include "VisibilityBufferPassAlpha.vert.fsl"
+#end
+
+#frag FT_PRIM_ID visibilityBuffer_pass_alpha.frag
+#include "VisibilityBufferPassAlpha.frag.fsl"
+#end
+
+#frag FT_PRIM_ID visibilityBuffer_pass_alpha_multiple_mats.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#include "VisibilityBufferPassAlpha.frag.fsl"
+#end
+
+
+#frag FT_PRIM_ID visibilityBuffer_pass_alpha_atlas.frag
+#define ATLAS_FALLBACK
+#include "VisibilityBufferPassAlpha.frag.fsl"
+#end
+
+#frag FT_PRIM_ID visibilityBuffer_pass_alpha_atlas_multiple_mats.frag
+#define ATLAS_FALLBACK
+#define HANDLE_MULTIPLE_MATERIALS
+#include "VisibilityBufferPassAlpha.frag.fsl"
+#end
+
+#vert FT_MULTIVIEW visibilityBuffer_pass_alpha_primid.vert
+#define PRIMID_FALLBACK
+#include "VisibilityBufferPassAlpha.vert.fsl"
+#end
+
+#frag visibilityBuffer_pass_alpha_primid.frag
+#define PRIMID_FALLBACK
+#include "VisibilityBufferPassAlpha.frag.fsl"
+#end
+
+#frag visibilityBuffer_pass_alpha_primid_multiple_mats.frag
+#define PRIMID_FALLBACK
+#define HANDLE_MULTIPLE_MATERIALS
+#include "VisibilityBufferPassAlpha.frag.fsl"
+#end
+
+#frag FT_PRIM_ID visibilityBuffer_pass_alpha_atlas_primid.frag
+#define ATLAS_FALLBACK
+#define PRIMID_FALLBACK
+#include "VisibilityBufferPassAlpha.frag.fsl"
+#end
+
+#frag FT_PRIM_ID visibilityBuffer_pass_alpha_atlas_primid_multiple_mats.frag
+#define ATLAS_FALLBACK
+#define PRIMID_FALLBACK
+#define HANDLE_MULTIPLE_MATERIALS
+#include "VisibilityBufferPassAlpha.frag.fsl"
+#end
+
+#comp triangle_filtering.comp
+#include "TriangleFiltering.comp.fsl"
+#end
+
+#comp clear_buffers.comp
+#include "TriangleFilteringClear.comp.fsl"
+#end
+
+#comp shader_instance_prefix_sum.comp
+#include "ShaderInstancePrefixSum.comp.fsl"
+#end
+
+#comp scatter_shader_instances.comp
+#include "ScatterShaderInstances.comp.fsl"
+#end
+
+#comp build_material_tiles_SAMPLE_1.comp
+#define SAMPLE_COUNT 1
+#include "BuildMaterialTileMasks.comp.fsl"
+#end
+
+#comp build_material_tiles_SAMPLE_2.comp
+#define SAMPLE_COUNT 2
+#include "BuildMaterialTileMasks.comp.fsl"
+#end
+
+#comp build_material_tiles_SAMPLE_4.comp
+#define SAMPLE_COUNT 4
+#include "BuildMaterialTileMasks.comp.fsl"
+#end
+
+//--------------------------------------------
+// Compute pixel-list
+//--------------------------------------------
+#comp clear_pixel_counts.comp
+#include "ClearPixelCounts.comp.fsl"
+#end
+
+#comp count_pixels.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT | WAVE_OPS_ARITHMETIC_BIT)
+#include "CountPixels.comp.fsl"
+#end
+
+#comp pixel_command_prefix_sum_tile_materials.comp
+#include "PixelCommandPrefixSumTileMaterials.comp.fsl"
+#end
+
+#comp pixel_command_prefix_sum_tiles.comp
+#include "PixelCommandPrefixSumTiles.comp.fsl"
+#end
+
+#comp pixel_command_prefix_sum_pipelines.comp
+#include "PixelCommandPrefixSumPipelines.comp.fsl"
+#end
+
+#comp finalize_tile_material_offsets.comp
+#include "FinalizeTileMaterialOffsets.comp.fsl"
+#end
+
+#comp write_pixel_commands.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT | WAVE_OPS_ARITHMETIC_BIT)
+#include "WritePixelCommands.comp.fsl"
+#end
+
+#comp generate_dispatch_args.comp
+#include "GenerateDispatchArgs.comp.fsl"
+#end
+
+#comp visibilityBuffer_shade_compute_mat_00.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 0u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_01.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 1u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_02.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 2u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_03.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 3u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_04.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 4u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_05.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 5u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_06.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 6u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_07.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 7u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_08.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 8u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_09.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 9u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_10.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 10u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_11.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 11u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_12.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 12u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_13.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 13u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_14.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 14u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_15.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 15u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_16.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 16u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_17.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 17u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_18.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 18u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_19.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 19u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_20.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 20u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_21.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 21u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_22.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 22u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_23.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 23u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_24.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 24u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_25.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 25u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_26.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 26u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_27.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 27u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_28.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 28u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_29.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 29u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_30.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 30u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_mat_31.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define MATERIAL_SHADER_ID 31u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+
+// Atlas-fallback variants of the compute shade for devices below the bindless texture limit
+#comp visibilityBuffer_shade_compute_atlas_mat_00.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 0u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_01.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 1u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_02.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 2u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_03.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 3u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_04.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 4u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_05.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 5u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_06.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 6u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_07.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 7u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_08.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 8u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_09.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 9u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_10.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 10u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_11.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 11u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_12.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 12u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_13.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 13u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_14.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 14u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_15.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 15u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_16.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 16u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_17.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 17u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_18.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 18u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_19.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 19u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_20.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 20u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_21.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 21u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_22.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 22u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_23.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 23u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_24.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 24u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_25.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 25u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_26.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 26u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_27.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 27u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_28.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 28u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_29.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 29u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_30.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 30u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+#comp visibilityBuffer_shade_compute_atlas_mat_31.comp
+ENABLE_WAVEOPS(WAVE_OPS_BASIC_BIT | WAVE_OPS_BALLOT_BIT)
+#define ATLAS_FALLBACK
+#define MATERIAL_SHADER_ID 31u
+#include "VisibilityBufferShade.comp.fsl"
+#end
+
+#comp visibilityBuffer_shade_sky_compute.comp
+#include "VisibilityBufferShadeSky.comp.fsl"
+#end
+
+#comp clear_light_clusters.comp
+#include "LightClustersClear.comp.fsl"
+#end
+
+#comp cluster_lights.comp
+#include "LightClusters.comp.fsl"
+#end
+
+#vert FT_MULTIVIEW display.vert
+#include "Display.vert.fsl"
+#end
+
+#frag FT_MULTIVIEW godray_SAMPLE_COUNT_1.frag
+#define SAMPLE_COUNT 1
+#include "Godray.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW godray_SAMPLE_COUNT_2.frag
+#define SAMPLE_COUNT 2
+#include "Godray.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW godray_SAMPLE_COUNT_4.frag
+#define SAMPLE_COUNT 4
+#include "Godray.frag.fsl"
+#end
+
+#comp godray_blur.comp
+#include "GodrayBlur.comp.fsl"
+#end
+
+#frag FT_MULTIVIEW display.frag
+#include "Display.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_materialIDDepth_SAMPLE_1.frag
+#define SAMPLE_COUNT 1
+#include "VisibilityBufferMaterialIDDepth.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_materialIDDepth_SAMPLE_2.frag
+#define SAMPLE_COUNT 2
+#include "VisibilityBufferMaterialIDDepth.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_materialIDDepth_SAMPLE_4.frag
+#define SAMPLE_COUNT 4
+#include "VisibilityBufferMaterialIDDepth.frag.fsl"
+#end
+
+#vert FT_MULTIVIEW visibilityBuffer_shade.vert
+#include "VisibilityBufferShade.vert.fsl"
+#end
+
+#vert FT_MULTIVIEW FT_VDP visibilityBuffer_shade_multiple_mats.vert
+#define HANDLE_MULTIPLE_MATERIALS
+#include "VisibilityBufferShade.vert.fsl"
+#end
+
+#vert FT_MULTIVIEW visibilityBuffer_shade_sky.vert
+#include "VisibilityBufferShadeSky.vert.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_sky.frag
+#include "VisibilityBufferShadeSky.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_sky_godray.frag
+#define ENABLED_GODRAY
+#include "VisibilityBufferShadeSky.frag.fsl"
+#end
+
+#vert FT_MULTIVIEW progMSAAResolve.vert
+#include "ProgMSAAResolve.vert.fsl"
+#end
+
+//--------------------------------------------
+//-- Visibility Buffer Shading
+//--------------------------------------------
+
+// We should have a better way of generating these
+#frag FT_MULTIVIEW visibilityBuffer_shade_SAMPLE_1.frag
+#define SAMPLE_COUNT 1
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_SAMPLE_1_GRAY.frag
+#define SAMPLE_COUNT 1
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_multiple_mats_SAMPLE_1.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define SAMPLE_COUNT 1
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_multiple_mats_SAMPLE_1_GRAY.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define SAMPLE_COUNT 1
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_SAMPLE_1_AO.frag
+#define SAMPLE_COUNT 1
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_SAMPLE_1_AO_GRAY.frag
+#define SAMPLE_COUNT 1
+#define USE_AMBIENT_OCCLUSION 1
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_multiple_mats_SAMPLE_1_AO.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define SAMPLE_COUNT 1
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_multiple_mats_SAMPLE_1_AO_GRAY.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define SAMPLE_COUNT 1
+#define USE_AMBIENT_OCCLUSION 1
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_SAMPLE_2.frag
+#define SAMPLE_COUNT 2
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_SAMPLE_2_GRAY.frag
+#define SAMPLE_COUNT 2
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_multiple_mats_SAMPLE_2.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define SAMPLE_COUNT 2
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_multiple_mats_SAMPLE_2_GRAY.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define SAMPLE_COUNT 2
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_SAMPLE_2_AO.frag
+#define SAMPLE_COUNT 2
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_SAMPLE_2_AO_GRAY.frag
+#define SAMPLE_COUNT 2
+#define USE_AMBIENT_OCCLUSION 1
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_multiple_mats_SAMPLE_2_AO.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define SAMPLE_COUNT 2
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_multiple_mats_SAMPLE_2_AO_GRAY.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define SAMPLE_COUNT 2
+#define USE_AMBIENT_OCCLUSION 1
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_SAMPLE_4.frag
+#define SAMPLE_COUNT 4
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_SAMPLE_4_GRAY.frag
+#define SAMPLE_COUNT 4
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_multiple_mats_SAMPLE_4.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define SAMPLE_COUNT 4
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_multiple_mats_SAMPLE_4_GRAY.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define SAMPLE_COUNT 4
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_SAMPLE_4_AO.frag
+#define SAMPLE_COUNT 4
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_SAMPLE_4_AO_GRAY.frag
+#define SAMPLE_COUNT 4
+#define USE_AMBIENT_OCCLUSION 1
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_multiple_mats_SAMPLE_4_AO.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define SAMPLE_COUNT 4
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_multiple_mats_SAMPLE_4_AO_GRAY.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define SAMPLE_COUNT 4
+#define USE_AMBIENT_OCCLUSION 1
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_SAMPLE_1.frag
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 1
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_SAMPLE_1_GRAY.frag
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 1
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_multiple_mats_SAMPLE_1.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 1
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_multiple_mats_SAMPLE_1_GRAY.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 1
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_SAMPLE_1_AO.frag
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 1
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_SAMPLE_1_AO_GRAY.frag
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 1
+#define USE_AMBIENT_OCCLUSION 1
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_multiple_mats_SAMPLE_1_AO.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 1
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_multiple_mats_SAMPLE_1_AO_GRAY.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 1
+#define USE_AMBIENT_OCCLUSION 1
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_SAMPLE_2.frag
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 2
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_SAMPLE_2_GRAY.frag
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 2
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_multiple_mats_SAMPLE_2.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 2
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_multiple_mats_SAMPLE_2_GRAY.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 2
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_SAMPLE_2_AO.frag
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 2
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_SAMPLE_2_AO_GRAY.frag
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 2
+#define USE_AMBIENT_OCCLUSION 1
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_multiple_mats_SAMPLE_2_AO.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 2
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_multiple_mats_SAMPLE_2_AO_GRAY.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 2
+#define USE_AMBIENT_OCCLUSION 1
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_SAMPLE_4.frag
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 4
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_SAMPLE_4_GRAY.frag
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 4
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_multiple_mats_SAMPLE_4.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 4
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_multiple_mats_SAMPLE_4_GRAY.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 4
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_SAMPLE_4_AO.frag
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 4
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_SAMPLE_4_AO_GRAY.frag
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 4
+#define USE_AMBIENT_OCCLUSION 1
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_multiple_mats_SAMPLE_4_AO.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 4
+#include "VisibilityBufferShade.frag.fsl"
+#end
+#frag FT_MULTIVIEW visibilityBuffer_shade_atlas_multiple_mats_SAMPLE_4_AO_GRAY.frag
+#define HANDLE_MULTIPLE_MATERIALS
+#define ATLAS_FALLBACK
+#define SAMPLE_COUNT 4
+#define USE_AMBIENT_OCCLUSION 1
+#define ENABLED_GODRAY
+#include "VisibilityBufferShade.frag.fsl"
+#end
+
+
+#frag FT_MULTIVIEW progMSAAResolve_SAMPLE_1.frag
+#define SAMPLE_COUNT 1
+#include "ProgMSAAResolve.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW progMSAAResolve_SAMPLE_2.frag
+#define SAMPLE_COUNT 2
+#include "ProgMSAAResolve.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW progMSAAResolve_SAMPLE_4.frag
+#define SAMPLE_COUNT 4
+#include "ProgMSAAResolve.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW msaa_edge_detect_SAMPLE_2.frag
+#define SAMPLE_COUNT 2
+#include "MsaaEdgeDetect.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW msaa_edge_detect_SAMPLE_4.frag
+#define SAMPLE_COUNT 4
+#include "MsaaEdgeDetect.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW msaa_stencil_downscale_SAMPLE_2.frag
+#define SAMPLE_COUNT 2
+#include "MsaaStencilDownscale.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW msaa_stencil_downscale_SAMPLE_4.frag
+#define SAMPLE_COUNT 4
+#include "MsaaStencilDownscale.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW msaa_debug_SAMPLE_2.frag
+#define SAMPLE_COUNT 2
+#include "DebugMSAA.frag.fsl"
+#end
+
+#frag FT_MULTIVIEW msaa_debug_SAMPLE_4.frag
+#define SAMPLE_COUNT 4
+#include "DebugMSAA.frag.fsl"
+#end

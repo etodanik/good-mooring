@@ -1,0 +1,109 @@
+/*
+ * Copyright (c) 2017-2026 The Forge Interactive Inc.
+ *
+ * This file is part of The-Forge
+ * (see https://github.com/ConfettiFX/The-Forge).
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+*/
+
+#include "VisibilityBufferResources.h.fsl"
+#include "GLobal.srt.h"
+
+// Wave-scalarized cursor allocation. Disabled on Android for the same subgroup reason as CountPixels.
+#ifndef USE_WAVE_SCALARIZATION
+#if defined(TARGET_ANDROID) || defined(ANDROID) || defined(TARGET_QUEST)
+#define USE_WAVE_SCALARIZATION 0
+#else
+#define USE_WAVE_SCALARIZATION 1
+#endif
+#endif
+
+// Scatter visible pixels into the sorted command list; padding bits mark rounded gaps.
+ROOT_SIGNATURE(ComputeRootSignature)
+NUM_THREADS(8, 8, 1)
+void CS_MAIN(SV_DispatchThreadID(uint3) threadID)
+{
+	INIT_MAIN;
+	uint2 pixel = threadID.xy;
+	if (pixel.x >= gPerFrameConstants.mRenderWidth || pixel.y >= gPerFrameConstants.mRenderHeight)
+	{
+		RETURN();
+	}
+
+	uint numTilesX = gPerFrameConstants.mNumTilesX;
+	uint numDispatchMaterials = gPerFrameConstants.mNumDispatchMaterials;
+
+	uint maxMaterialCount = min(gPerFrameConstants.mMaxMaterialCount, uint(MATERIAL_ID_MASK));
+	uint dispatchMaterialID = uint(LoadTex2D(gMaterialIDTex, NO_SAMPLER, pixel, 0).r * MATERIAL_ID_UNORM16_MAX + 0.5f);
+	if (dispatchMaterialID >= maxMaterialCount || dispatchMaterialID >= numDispatchMaterials)
+	{
+		RETURN();
+	}
+
+	// Keep the key in sync with CountPixels.
+	uint tileX = pixel.x >> TILE_SIZE_LOG2;
+	uint tileY = pixel.y >> TILE_SIZE_LOG2;
+	uint tileIndex = tileY * numTilesX + tileX;
+	uint tileMaterialIndex = tileIndex * numDispatchMaterials + dispatchMaterialID;
+
+	uint slot = 0u;
+#if USE_WAVE_SCALARIZATION
+	// Collapse same key lanes to one cursor atomic per wave.
+	bool pending = true;
+	for (uint guard = 0u; guard < COMPUTE_SHADE_GROUP_SIZE; ++guard)
+	{
+		uint uniformKey = WaveActiveMin(pending ? tileMaterialIndex : 0xFFFFFFFFu);
+		if (uniformKey == 0xFFFFFFFFu)
+		{
+			break;
+		}
+		bool match = pending && (uniformKey == tileMaterialIndex);
+		uint matchRank = WavePrefixCountBits(match);
+		uint matchCount = WaveActiveCountBits(match);
+		uint reserveBase = 0u;
+		if (match && matchRank == 0u)
+		{
+			AtomicAdd(gPixelTileMaterialCountOffsets[tileMaterialIndex], matchCount, reserveBase);
+		}
+		// Broadcast the reserved base to the other matching lanes.
+		uint broadcastBase = WaveActiveMax((match && matchRank == 0u) ? reserveBase : 0u);
+		if (match)
+		{
+			slot = broadcastBase + matchRank;
+			pending = false;
+		}
+	}
+#else
+	AtomicAdd(gPixelTileMaterialCountOffsets[tileMaterialIndex], 1u, slot);
+#endif
+
+	uint maxPixelCommandSlots = gPerFrameConstants.mPixelCommandMaskUintCount * 32u;
+	if (slot >= maxPixelCommandSlots)
+	{
+		RETURN();
+	}
+
+	// Record which pixel VB Shade compute will work on
+	uint command = pixel.x | (pixel.y << 16u);
+	gPixelCommands[slot] = command;
+	// Mark real pixels so rounded padding threads can early out in VB Shade
+	uint previousMask = 0u;
+	AtomicAnd(gPixelCommandPaddingMask[slot >> 5u], ~(1u << (slot & 31u)), previousMask);
+	RETURN();
+}

@@ -1,0 +1,97 @@
+// Shared, linear-light art direction. Values are intentionally independent of
+// the physical spectrum: changing exposure or colour cannot change handling.
+float hashWater(float2 p)
+{
+    float3 q=frac(float3(p.x,p.y,p.x)*.1031);
+    q+=dot(q,q.yzx+33.33);
+    return frac((q.x+q.y)*q.z);
+}
+float3 waterNoiseGradient(float2 p)
+{
+    float2 i=floor(p), f=frac(p), derivative=6*f*(1-f); f=f*f*(3-2*f);
+    float a=hashWater(i), b=hashWater(i+float2(1,0));
+    float c=hashWater(i+float2(0,1)), d=hashWater(i+float2(1,1));
+    return float3(lerp(lerp(a,b,f.x),lerp(c,d,f.x),f.y),
+                  lerp(b-a,d-c,f.y)*derivative.x,lerp(c-a,d-b,f.x)*derivative.y);
+}
+float waterNoise(float2 p) { return waterNoiseGradient(p).x; }
+float2 cloudLayer(float cover) { return float2(650,1200+1900*smoothstep(.55,1.0,cover)); }
+float cloudDensity(float3 world,float cover,float time,float footprint)
+{
+    float2 layer=cloudLayer(cover);
+    float h=(world.y-layer.x)/layer.y;
+    if(h<=0 || h>=1 || cover<=0) return 0;
+    float3 p=world+float3(time*4,0,time*1.5);
+    // A broad, non-periodic weather field separates cloud groups and warps
+    // the cached shape. Repeating the volume alone forms rows at the horizon.
+    float weather=.7*waterNoise(p.xz/7000)+.3*waterNoise(p.xz/2100+19.7);
+    // Weather controls whole cloud towers. Height variation and wind shear
+    // prevent the volume from reading as a thin, repeated horizontal slab.
+    p.xz+=(weather-.5)*float2(2300,-1700)+h*h*float2(260,130);
+    float3 q=float3(p.x*.83+p.z*.55,p.y,p.z*.83-p.x*.55);
+    float base=SampleLvlTex3D(gCloudNoiseTexture,gSamplerTrilinearWrap,q/float3(4400,4000,4400),0).r;
+    float3 secondary=float3(q.z*.73+q.x*.68,q.y,q.x*.73-q.z*.68);
+    float broad=SampleLvlTex3D(gCloudNoiseTexture,gSamplerTrilinearWrap,secondary/float3(8300,2600,8300)+float3(.37,.7,.13),0).r;
+    base=base*.55+broad*.45;
+    float erosion=SampleLvlTex3D(gCloudNoiseTexture,gSamplerTrilinearWrap,p/320,0).g;
+    erosion=lerp(erosion,.5,smoothstep(20.0,120.0,footprint));
+    float coverage=smoothstep(.6-cover*.5,.85-cover*.7,weather);
+    // Raise the density threshold with height instead of clipping a saturated
+    // shape against a common roof. Individual billows keep rounded tops.
+    float threshold=.60-cover*.25+h*h*.35;
+    float density=saturate((base-threshold-erosion*.12)*6);
+    float billows=density*smoothstep(0.0,.055,h)*(1-smoothstep(.9,1.0,h))*coverage*1.8;
+    // Heavy weather closes the gaps beneath the towers. Isolated bright
+    // cumulus against a clear blue dome did not describe an overcast storm.
+    float stratus=(.03+.28*base*base)*smoothstep(.65,.95,cover);
+    stratus*=smoothstep(0.0,.055,h)*(1-smoothstep(.18,.48,h));
+    return max(billows,stratus);
+}
+float cloudShadow(float3 world,float cover,float time,float footprint,float3 sun)
+{
+    float opticalDepth=0;
+    float2 layer=cloudLayer(cover);
+    for(uint i=0;i<3;i++)
+    {
+        float height=layer.x+(float(i)+.5)*layer.y/3;
+        float distance=max(0.0,(height-world.y)/max(.05,sun.y));
+        opticalDepth+=cloudDensity(world+sun*distance,cover,time,max(footprint,30.0))*layer.y/(3*max(.05,sun.y));
+    }
+    return exp(-opticalDepth*.012);
+}
+float sunTransmission(float cover) { return exp(-5*cover*cover*cover*cover); }
+float waterFog(float distance,float rain) { return 1-exp(-distance*(.0018+rain*.0045)); }
+float3 diffuseWaterScene(float3 world,float3 normal,float cover,float time,float3 sun)
+{
+    float direct=max(dot(normal,sun),0.0)*sunTransmission(cover)*cloudShadow(world,cover,time,0,sun);
+    return lerp(float3(.22,.32,.4),float3(.1,.14,.19),cover)+float3(1,.9,.72)*direct*.85;
+}
+float3 clearWaterSky(float3 direction,float cover,float3 light)
+{
+    float h=saturate(direction.y);
+    float3 clear=lerp(float3(.24,.46,.72),float3(.012,.085,.28),pow(h,.55));
+    float3 overcast=lerp(float3(.18,.22,.24),float3(.045,.06,.075),pow(h,.6));
+    float3 sky=lerp(clear,overcast,smoothstep(.35,.95,cover));
+    float sun=saturate(dot(direction,light));
+    // Direct sunlight on water is integrated by its BRDF, not counted twice.
+    sky+=float3(1,.77,.42)*pow(sun,48.0)*.14*sunTransmission(cover);
+    return sky;
+}
+// Henyey-Greenstein single-scattering phase, normalized over solid angle.
+float waterPhase(float cosine,float g)
+{
+    return (1-g*g)/(12.5663706*pow(max(.05,1+g*g-2*g*cosine),1.5));
+}
+float meanWaterFresnel(float cosine,float slopeVariance)
+{
+    // Bruneton et al., 2010, Eq. 26: unresolved facets mask one another at
+    // grazing angles. A smooth-surface Fresnel over-brightens rough sky light.
+    // The scalar moment assumes equal variance along both tangent axes.
+    float sigma=min(.5,sqrt(max(0.0,slopeVariance)*.5));
+    return .02037+.97963*pow(1-saturate(cosine),5*exp(-2.69*sigma))/(1+22.7*pow(sigma,1.5));
+}
+float3 filmicWater(float3 color)
+{
+    color=max(color,0.0);
+    return saturate((color*(2.51*color+.03))/(color*(2.43*color+.59)+.14));
+}

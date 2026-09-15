@@ -1,0 +1,8 @@
+#include "WaterGeometry.h.fsl"
+WaterFragment VS_MAIN(SV_VertexID(uint) vertexIndex)
+{
+    INIT_MAIN;
+    WaterFragment result=waterVertex(vertexIndex);
+    result.position=mul(gWater.lightProjection,float4(result.world,1));
+    RETURN(result);
+}

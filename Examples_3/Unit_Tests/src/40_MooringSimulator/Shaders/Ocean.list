@@ -1,0 +1,47 @@
+#include "../../../../../Common_3/Graphics/FSL/defaults.h"
+#comp ocean_spectrum.comp
+#include "OceanSpectrum.comp.fsl"
+#end
+#comp ocean_fft.comp
+#include "OceanFFT.comp.fsl"
+#end
+#comp ocean_surface.comp
+#include "OceanSurface.comp.fsl"
+#end
+#comp ocean_packets.comp
+#include "OceanPackets.comp.fsl"
+#end
+#comp ocean_mip.comp
+#include "OceanMip.comp.fsl"
+#end
+#vert water.vert
+#include "Water.vert.fsl"
+#end
+#frag water.frag
+#include "Water.frag.fsl"
+#end
+#vert water_light.vert
+#include "WaterLight.vert.fsl"
+#end
+#frag water_light.frag
+#include "WaterLight.frag.fsl"
+#end
+
+#comp water_effects.comp
+#include "WaterEffects.comp.fsl"
+#end
+#vert water_spray.vert
+#include "WaterSpray.vert.fsl"
+#end
+#frag water_spray.frag
+#include "WaterSpray.frag.fsl"
+#end
+#comp water_sky.comp
+#include "WaterSky.comp.fsl"
+#end
+#comp water_sky_filter.comp
+#include "SkyFilter.comp.fsl"
+#end
+#comp cloud_noise.comp
+#include "CloudNoise.comp.fsl"
+#end

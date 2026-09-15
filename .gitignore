@@ -1,0 +1,64 @@
+# Local build trees (includes generated shaders/fonts, QA images and benchmarks)
+/build/
+/build-*/
+/cmake-build-*/
+/BuildArtifacts/
+/DerivedData/
+/_deps/
+
+# CMake and Ninja state, including accidental in-source builds
+CMakeFiles/
+CMakeCache.txt
+CMakeUserPresets.json
+/Makefile
+/build.ninja
+/.ninja_deps
+/.ninja_log
+/cmake_install.cmake
+/install_manifest.txt
+/CTestTestfile.cmake
+/Testing/
+/compile_commands.json
+
+# Headers regenerated from MathShaders.list by the MooringMath build target
+/Common_3/Utilities/Math/MathLibrary.h
+/Common_3/Tools/ForgeShadingLanguage/includes/MathLibrary.h
+
+# Xcode user state and generated diagnostics; keep shared projects and schemes
+xcuserdata/
+*.xcuserstate
+*.xccheckout
+*.xcscmblueprint
+*.xcresult/
+*.dSYM/
+
+# Local profiling captures and runtime reports
+*.tracy
+*.trace
+*.gputrace
+*.memleaks
+/MooringSimulator*.log
+/Mooring*Tests*.log
+/MooringFontTool*.log
+
+# Python tooling caches and local environments
+__pycache__/
+*.pyc
+*.pyo
+/.venv/
+/venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Scratch data and local tool state
+/tmp/
+/.cache/
+/.openai/
+
+# macOS metadata and editor backup files
+.DS_Store
+._*
+*.swp
+*.swo
+*~

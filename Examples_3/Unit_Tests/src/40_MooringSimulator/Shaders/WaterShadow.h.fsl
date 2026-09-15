@@ -1,0 +1,44 @@
+#ifndef MOORING_WATER_SHADOW
+#define MOORING_WATER_SHADOW
+float shadowWater(float3 world)
+{
+    float4 clip=mul(gWater.shadowMatrix,float4(world,1));
+    float2 uv=clip.xy*.5+float2(.5,.5); uv.y=1-uv.y;
+    if(any(uv<0) || any(uv>1)) return 1.0;
+    float resolution=gWater.quality.z;
+    // Outside all projected hull/dock triangles the map contains only the
+    // flat seabed or clear depth. Keep the original test near the bottom and
+    // beyond the far plane; elsewhere every PCF tap is known to be lit.
+    if((any(uv<gWater.shadowBounds.xy) || any(uv>gWater.shadowBounds.zw)) &&
+       world.y>gWater.surface.w-gWater.screen.w+128/resolution && clip.z-.00035<=1)
+        return 1.0;
+    float2 pixel=uv*resolution-.5, base=floor(pixel), fraction=frac(pixel);
+    float light=0;
+    for(int y=0;y<3;y++) for(int x=0;x<3;x++)
+    {
+        float2 sampleUV=(base+float2(x,y)-.5)/resolution;
+        float depth=SampleLvlTex2D(gShadow,gSamplerPointClamp,sampleUV,0).r;
+        float weightX=x==0?1-fraction.x:x==1?1.0:fraction.x;
+        float weightY=y==0?1-fraction.y:y==1?1.0:fraction.y;
+        light+=(clip.z-.00035<=depth?1.0:0.0)*weightX*weightY;
+    }
+    float edge=smoothstep(0.0,.025,min(min(uv.x,1-uv.x),min(uv.y,1-uv.y)));
+    return lerp(1.0,light*.25,edge);
+}
+float waterLightPath(float3 world,float flatPath)
+{
+    float4 clip=mul(gWater.lightProjection,float4(world,1));
+    float2 uv=clip.xy*float2(.5,-.5)+.5;
+    if(any(uv<=0) || any(uv>=1)) return flatPath;
+    float entry=SampleLvlTex2D(gWaterLight,gSamplerBilinearClamp,uv,0).r;
+    if(entry>=.9999) return flatPath;
+    float edge=smoothstep(0.0,.04,min(min(uv.x,1-uv.x),min(uv.y,1-uv.y)));
+    return lerp(flatPath,max(0.0,(clip.z-entry)*gWater.volume.x),edge);
+}
+float shadowWave(float3 world,float3 normal)
+{
+    // Share the light-entry field with scattering. Bias within one light
+    // texel and soften the depth difference to avoid self-shadow stripes.
+    return 1-smoothstep(.12,.45,waterLightPath(world+normal*.08,0));
+}
+#endif

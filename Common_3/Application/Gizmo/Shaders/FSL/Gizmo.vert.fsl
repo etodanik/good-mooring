@@ -1,0 +1,93 @@
+/*
+ * Copyright (c) 2017-2026 The Forge Interactive Inc.
+ *
+ * This file is part of The-Forge
+ * (see https://github.com/ConfettiFX/The-Forge).
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+#include "Gizmo.srt.h"
+
+STRUCT(VSInput)
+{
+    DATA(float4, Position, POSITION);
+};
+
+STRUCT(VSOutput)
+{
+    DATA(float4, Position, SV_Position);
+#ifdef GRID
+    DATA(float4, LocalPos, TEXCOORD);
+    DATA(float4, ViewPosAndFadeDist, POSITION);
+#endif
+    DATA(float4, Color, COLOR);
+};
+
+ROOT_SIGNATURE(DefaultRootSignature)
+VSOutput VS_MAIN(VSInput In, SV_InstanceID(uint) InstanceID)
+{
+    INIT_MAIN;
+    VSOutput Out;
+    uint instanceIdx = InstanceID + gGizmoInstanceStart.mInstanceStart;
+    float4x4 instanceM = gGizmoInstance[instanceIdx].mTRS;
+    float4 instanceC = gGizmoInstance[instanceIdx].mColor;
+
+#ifdef FRONT_FACE
+    float3 globalPos = mul(instanceM, float4(0, 0, 0, 1)).xyz;
+    float3 scale = mul(instanceM, float4(1, 1, 1, 0)).xyz;
+    float3 localPos = mul(gUniformBlock.mCamera, float4(globalPos, 1)).xyz;
+    localPos += float3(In.Position.x * scale.x, In.Position.y * scale.y, In.Position.z * scale.z) * localPos.z; 
+    float4 cameraLocal = float4(localPos, 1);
+    Out.Color = instanceC;
+#endif
+
+#ifdef GIZMO_LOCAL_INSTANCE
+    float4 vert = In.Position;
+    uint localInstanceIdx = asuint(vert.w);
+    
+    vert.w = 1;
+    vert = mul(gGizmoLocalInstance[localInstanceIdx].mTRS, vert);
+    vert = mul(instanceM, vert);
+
+    float4 cameraLocal = mul(gUniformBlock.mCamera, vert); 
+    Out.Color = gGizmoLocalInstance[localInstanceIdx].mColor;
+#endif
+
+#ifdef DEFAULT
+    float4 worldGlobal = mul(instanceM, float4(In.Position.xyz, 1)); 
+    float4 cameraLocal = mul(gUniformBlock.mCamera, worldGlobal); 
+
+    Out.Color = instanceC;
+#endif
+
+#ifdef GRID
+    float fadeDist = instanceM[3].w;
+    instanceM[3].w = 1.0;
+    float4 worldGlobal = mul(instanceM, float4(In.Position.xyz, 1)); 
+    float4 cameraLocal = mul(gUniformBlock.mCamera, worldGlobal); 
+    
+    Out.LocalPos = In.Position;
+    Out.ViewPosAndFadeDist = float4(cameraLocal.xyz, fadeDist);
+    Out.Color = instanceC;
+#endif
+
+    Out.Position = mul(gUniformBlock.mProjection, cameraLocal);
+
+    RETURN(Out);
+}

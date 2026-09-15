@@ -1,0 +1,31 @@
+#include "Ocean.srt.h"
+#define CMUL(a,b) float2((a).x*(b).x-(a).y*(b).y,(a).x*(b).y+(a).y*(b).x)
+NUM_THREADS(8,8,1)
+void CS_MAIN(SV_DispatchThreadID(uint3) id)
+{
+    INIT_MAIN;
+    uint n=gOcean.transform.x;
+    int2 k=int2(id.xy); k-=int2(k.x>=int(n/2)?int(n):0,k.y>=int(n/2)?int(n):0);
+    uint index=id.z*n*n+id.y*n+id.x;
+    float4 output=float4(0,0,0,0);
+    if(abs(k.x)<64 && abs(k.y)<64)
+    {
+        uint2 coord=uint2((k+128)%128), opposite=uint2((-k+128)%128);
+        float4 a=gSpectrum[id.z*128*128+coord.y*128+coord.x];
+        float4 b=gSpectrum[id.z*128*128+opposite.y*128+opposite.x];
+        float phase=a.z*gOcean.clockDepth.x;
+        float2 e=float2(cos(phase),-sin(phase));
+        float2 h=CMUL(a.xy,e)+CMUL(float2(b.x,-b.y),float2(e.x,-e.y));
+        float advection=dot(float2(k),gOcean.current.xz)*6.28318530718/gOcean.lengths[id.z]*gOcean.clockDepth.x;
+        h=CMUL(h,float2(cos(advection),-sin(advection)));
+        // Clamp the deep-water limit before fast-math tanh: large kh can
+        // otherwise become inf/inf on Metal and poison an entire FFT band.
+        float kh=clamp(a.w*gOcean.clockDepth.z,.0001,10.0);
+        float factor=a.w>0 ? 6.28318530718/gOcean.lengths[id.z]/max(a.w,.000001)/tanh(kh) : 0;
+        float2 dx=float2(-h.y,h.x)*float(k.x)*factor;
+        float2 dz=float2(-h.y,h.x)*float(k.y)*factor;
+        output=float4(h,dx+float2(-dz.y,dz.x));
+    }
+    gDestination[index]=output;
+    RETURN();
+}

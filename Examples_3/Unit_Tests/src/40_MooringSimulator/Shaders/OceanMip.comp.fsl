@@ -1,0 +1,32 @@
+#include "Ocean.srt.h"
+// First and second slope moments preserve unresolved wave energy in the BRDF.
+// Each level contains all four bands; levels occupy disjoint buffer ranges.
+NUM_THREADS(8,8,1)
+void CS_MAIN(SV_DispatchThreadID(uint3) id)
+{
+    INIT_MAIN;
+    uint n=gOcean.transform.x, m=n>>gOcean.transform.y;
+    if(id.x>=m || id.y>=m)
+    {
+        RETURN();
+    }
+    uint parent=m*2;
+    uint source=16*((n*n-parent*parent)/3)+id.z*parent*parent;
+    uint destination=16*((n*n-m*m)/3)+id.z*m*m+id.y*m+id.x;
+    float4 surface=float4(0,0,0,0), moments=float4(0,0,0,0), whitewater=float4(0,0,0,0);
+    bool breakingBand=id.z==0 || id.z==2;
+    uint whitewaterSource=8*((n*n-parent*parent)/3)+(id.z/2)*parent*parent;
+    for(uint y=0;y<2;y++) for(uint x=0;x<2;x++)
+    {
+        uint i=source+(id.y*2+y)*parent+id.x*2+x;
+        surface+=gSource[i]; moments+=gNormals[i];
+        if(breakingBand) whitewater+=float4(gWhitewaterOutput[whitewaterSource+(id.y*2+y)*parent+id.x*2+x]);
+    }
+    gDestination[destination]=surface*.25;
+    gNormals[destination]=moments*.25;
+    if(breakingBand) {
+        uint at=8*((n*n-m*m)/3)+(id.z/2)*m*m+id.y*m+id.x;
+        gWhitewaterOutput[at]=min16float4(whitewater*.25);
+    }
+    RETURN();
+}

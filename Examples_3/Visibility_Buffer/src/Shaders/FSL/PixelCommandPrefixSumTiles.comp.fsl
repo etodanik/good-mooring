@@ -1,0 +1,93 @@
+/*
+ * Copyright (c) 2017-2026 The Forge Interactive Inc.
+ *
+ * This file is part of The-Forge
+ * (see https://github.com/ConfettiFX/The-Forge).
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+*/
+
+#include "VisibilityBufferResources.h.fsl"
+#include "GLobal.srt.h"
+
+// Prefix-sum level 2: one group per pipeline, scanning tile pixel totals
+#define SCAN_THREADS 256
+
+GroupShared(uint, sThreadTotals[SCAN_THREADS]);
+
+ROOT_SIGNATURE(ComputeRootSignature)
+NUM_THREADS(SCAN_THREADS, 1, 1)
+void CS_MAIN(SV_GroupID(uint3) groupID, SV_GroupThreadID(uint3) groupThreadID)
+{
+	INIT_MAIN;
+	uint numPipelines = gPerFrameConstants.mNumPipelines;
+	uint pipeline = groupID.x; // uniform across the group -> safe early out (no barrier divergence)
+	if (pipeline >= numPipelines)
+	{
+		RETURN();
+	}
+
+	uint numTiles = gPerFrameConstants.mNumTiles;
+	uint elemsPerThread = (numTiles + SCAN_THREADS - 1u) / SCAN_THREADS;
+	uint pipelineTileBase = pipeline * numTiles;
+	uint threadIndex = groupThreadID.x;
+	uint startTile = threadIndex * elemsPerThread;
+
+	// Pass 1: per thread total of its contiguous chunk of this pipeline tile pixel counts
+	uint localTotal = 0u;
+	for (uint tileOffset = 0u; tileOffset < elemsPerThread; ++tileOffset)
+	{
+		uint tile = startTile + tileOffset;
+		if (tile < numTiles)
+		{
+			localTotal += gPixelCountPerPipelineTile[pipelineTileBase + tile];
+		}
+	}
+	sThreadTotals[threadIndex] = localTotal;
+	GroupMemoryBarrier();
+
+	// Hillis-Steele inclusive scan of the per thread totals
+	for (uint offset = 1u; offset < SCAN_THREADS; offset <<= 1u)
+	{
+		uint addend = (threadIndex >= offset) ? sThreadTotals[threadIndex - offset] : 0u;
+		GroupMemoryBarrier();
+		sThreadTotals[threadIndex] += addend;
+		GroupMemoryBarrier();
+	}
+
+	uint runningOffset = sThreadTotals[threadIndex] - localTotal; // exclusive base within the pipeline
+
+	// Pass 2: write each tile pipeline relative offset
+	for (uint tileOffset = 0u; tileOffset < elemsPerThread; ++tileOffset)
+	{
+		uint tile = startTile + tileOffset;
+		if (tile < numTiles)
+		{
+			uint count = gPixelCountPerPipelineTile[pipelineTileBase + tile];
+			gPixelOffsetPerPipelineTile[pipelineTileBase + tile] = runningOffset;
+			runningOffset += count;
+		}
+	}
+
+	// Last thread contains the total for the pipeline
+	if (threadIndex == SCAN_THREADS - 1u)
+	{
+		gPixelPipelineCountOffsets[pipeline] = sThreadTotals[SCAN_THREADS - 1u];
+	}
+	RETURN();
+}

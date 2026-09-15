@@ -1,0 +1,82 @@
+#include "Water.srt.h"
+#include "WaterSampling.h.fsl"
+STRUCT(SprayFragment)
+{
+    DATA(float4, position, SV_Position);
+    DATA(float2, uv, TEXCOORD0);
+    DATA(float4, properties, TEXCOORD1);
+    DATA(float4, normalAge, TEXCOORD2);
+    DATA(float2, coordinate, TEXCOORD3);
+};
+SprayFragment VS_MAIN(SV_VertexID(uint) vertexIndex)
+{
+    INIT_MAIN;
+    uint index=vertexIndex/WATER_PARTICLE_VERTICES,localVertex=vertexIndex%WATER_PARTICLE_VERTICES,corner=localVertex%6;
+    float4 particle=gSprayDraw[index*3], life=gSprayDraw[index*3+1], meta=gSprayDraw[index*3+2];
+    bool froth=meta.x==WATER_FROTH, surfaceFoam=meta.x==WATER_FOAM || froth;
+    bool sheet=meta.x==WATER_SHEET;
+    if(life.w<=0 || (!surfaceFoam && localVertex>=(sheet?24u:6u)))
+    {
+        SprayFragment hidden;
+        hidden.position=float4(2,2,2,1); hidden.uv=float2(0,0);
+        hidden.properties=float4(0,0,0,0); hidden.normalAge=float4(0,1,0,0);
+        hidden.coordinate=float2(0,0);
+        RETURN(hidden);
+    }
+    float2 uv=float2((corner==1 || corner==2 || corner==4)?1.0:-1.0,(corner==2 || corner==4 || corner==5)?1.0:-1.0);
+    if(surfaceFoam) uv=uv*.5+float2(float((localVertex/6)&1u),float(localVertex/12))-.5;
+    float3 view=normalize(gWater.eye.xyz-particle.xyz), right=normalize(cross(float3(0,1,0),view)), up=cross(view,right);
+    float size=meta.y;
+    float age=saturate(particle.w/max(.01,life.w));
+    if(meta.x==WATER_DROPLET || meta.x==WATER_MIST) {
+        // Keep droplets compact while orienting their short axis of motion.
+        float3 flight=life.xyz-view*dot(life.xyz,view);
+        if(dot(flight,flight)>.001) { up=normalize(flight); right=normalize(cross(up,view)); }
+    }
+    if(sheet) {
+        // Four compact parcels occupy the shed fan's volume. They share one
+        // ballistic source, but never stretch surface lace into an airborne card.
+        float2 seed=frac(float2(.75487766,.56984029)*(float(localVertex/6)+meta.w*71));
+        float3 tangent=float3(cos(meta.z),0,sin(meta.z));
+        float3 flight=life.xyz-tangent*dot(life.xyz,tangent);
+        flight=dot(flight,flight)>.01?normalize(flight):float3(0,1,0);
+        size*=1+age;
+        particle.xyz+=(tangent*(seed.x-.5)*2+flight*(seed.y-.3))*size;
+        size*=.45+seed.x*.1;
+    }
+    if(meta.x==WATER_MIST) size*=1+particle.w*.8;
+    if(surfaceFoam) {
+        float angle=meta.z;
+        right=float3(cos(angle),0,sin(angle)); up=float3(-sin(angle),0,cos(angle));
+        size*=1+age*.2;
+    }
+    float stretch=froth?.9:meta.x==WATER_RAIN?18.0:meta.x==WATER_DROPLET?1.0+min(length(life.xyz)*.04,.35):meta.x==WATER_MIST?1.5:1.0;
+    float width=froth?1.6:1.0;
+    float3 world=particle.xyz+(right*uv.x*width+up*uv.y*stretch)*size;
+    float3 normal=normalize(cross(up,right));
+    float2 coordinate=float2(0,0); float foamMass=0;
+    if(surfaceFoam) {
+        // Conform each vertex so a crest clump cannot cut through the wave.
+        coordinate=life.xz+(right.xz*uv.x*width+up.xz*uv.y*stretch)*size;
+        float2 displaced;
+        float4 surface=surfaceAtCoordinate(coordinate,.35,displaced);
+        foamMass=surface.w;
+        world=float3(displaced.x,surface.x+.025,displaced.y);
+        normal=normalize(float3(-surface.y,1,-surface.z));
+        // Eight triangles form a compact crown, which settles as it ages.
+        float height=min(size*.45,gWater.foamAppearance.w)*(1-age);
+        height*=froth?saturate(foamMass*2)*meta.w:exp(-particle.w*2.4);
+        float2 crown=saturate(1-uv*uv);
+        world.y+=height*crown.x*crown.y;
+        normal=normalize(normal-(normalize(right)*uv.x*crown.y/width+normalize(up)*uv.y*crown.x/stretch)*(2*height/max(.01,size)));
+    }
+    SprayFragment result; result.position=mul(gWater.viewProjection,float4(world,1)); result.uv=uv;
+    float opacity=life.w>0?saturate((life.w-particle.w)*2)*saturate(particle.w*12):0;
+    if(froth) opacity*=meta.w;
+    if(meta.x==WATER_MIST) opacity/=1+particle.w*1.5;
+    result.properties=float4(opacity,meta.x,result.position.w,froth?foamMass:meta.w);
+    result.normalAge=float4(normal,age);
+    result.coordinate=coordinate;
+    if(opacity==0) result.position=float4(2,2,2,1);
+    RETURN(result);
+}

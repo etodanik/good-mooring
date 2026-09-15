@@ -1,0 +1,25 @@
+#include "SkyFilter.srt.h"
+NUM_THREADS(8,8,1)
+void CS_MAIN(SV_DispatchThreadID(uint3) id)
+{
+    INIT_MAIN;
+    uint height=gFilter.dimensions.x, m=height>>gFilter.dimensions.y, parent=m*2;
+    if(id.x>=m*2 || id.y>=m)
+    {
+        RETURN();
+    }
+    float4 radiance=float4(0,0,0,0); float weight=0;
+    for(uint y=0;y<2;y++)
+    {
+        // Lat-long texels have unequal solid angles. Without these weights,
+        // tiny polar caps dominate rough reflections as the mips get coarser.
+        float solidAngle=sin((float(id.y*2+y)+.5)*3.14159265359/float(parent));
+        for(uint x=0;x<2;x++)
+        {
+            radiance+=LoadRWTex2D(gRadiance,id.xy*2+uint2(x,y))*solidAngle;
+            weight+=solidAngle;
+        }
+    }
+    Write2D(gFiltered,id.xy,radiance/weight);
+    RETURN();
+}

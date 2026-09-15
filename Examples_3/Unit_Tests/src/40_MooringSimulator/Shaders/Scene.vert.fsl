@@ -1,0 +1,28 @@
+#include "Scene.srt.h"
+#include "WaterLighting.h.fsl"
+STRUCT(VertexInput)
+{
+    DATA(float3, position, Position);
+    DATA(float3, normal, NORMAL);
+    DATA(float3, color, COLOR0);
+    DATA(float, material, TEXCOORD0);
+};
+STRUCT(FragmentInput)
+{
+    DATA(float4, position, SV_Position);
+    DATA(float3, color, COLOR0);
+    DATA(float3, data, TEXCOORD0);
+    DATA(float2, plank, TEXCOORD1);
+};
+FragmentInput VS_MAIN(VertexInput input)
+{
+    INIT_MAIN;
+    FragmentInput output;
+    float3 world=input.position;
+    if(gCamera.modeLevel.x==1) world.y=2*gCamera.modeLevel.y-world.y;
+    output.position=mul(gCamera.viewProjection,float4(world,1));
+    output.color=input.color*diffuseWaterScene(input.position,input.normal,gCamera.weather.x,gCamera.modeLevel.z,gCamera.sun.xyz);
+    output.data=float3(input.position.y,output.position.w,gCamera.modeLevel.x);
+    output.plank=float2(input.position.z/.48,input.normal.y>.5?input.material:0);
+    RETURN(output);
+}

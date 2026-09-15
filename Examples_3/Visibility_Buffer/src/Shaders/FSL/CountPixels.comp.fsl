@@ -1,0 +1,89 @@
+/*
+ * Copyright (c) 2017-2026 The Forge Interactive Inc.
+ *
+ * This file is part of The-Forge
+ * (see https://github.com/ConfettiFX/The-Forge).
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+*/
+
+#include "VisibilityBufferResources.h.fsl"
+#include "GLobal.srt.h"
+
+// Wave-scalarized atomics. Disabled on Android because Vulkan divergent subgroup loops need stronger reconvergence
+#ifndef USE_WAVE_SCALARIZATION
+#if defined(TARGET_ANDROID) || defined(ANDROID) || defined(TARGET_QUEST)
+#define USE_WAVE_SCALARIZATION 0
+#else
+#define USE_WAVE_SCALARIZATION 1
+#endif
+#endif
+
+// Count one visible pixel per (tile, dispatchMaterial) key
+ROOT_SIGNATURE(ComputeRootSignature)
+NUM_THREADS(8, 8, 1)
+void CS_MAIN(SV_DispatchThreadID(uint3) threadID)
+{
+	INIT_MAIN;
+	uint2 pixel = threadID.xy;
+	if (pixel.x >= gPerFrameConstants.mRenderWidth || pixel.y >= gPerFrameConstants.mRenderHeight)
+	{
+		RETURN();
+	}
+
+	uint numTilesX = gPerFrameConstants.mNumTilesX;
+	uint maxMaterialCount = min(gPerFrameConstants.mMaxMaterialCount, uint(MATERIAL_ID_MASK));
+	uint dispatchMaterialID = uint(LoadTex2D(gMaterialIDTex, NO_SAMPLER, pixel, 0).r * MATERIAL_ID_UNORM16_MAX + 0.5f);
+	uint numDispatchMaterials = gPerFrameConstants.mNumDispatchMaterials;
+	if (dispatchMaterialID >= maxMaterialCount || dispatchMaterialID >= numDispatchMaterials)
+	{
+		RETURN();
+	}
+	uint tileX = pixel.x >> TILE_SIZE_LOG2;
+	uint tileY = pixel.y >> TILE_SIZE_LOG2;
+	uint tileIndex = tileY * numTilesX + tileX;
+	uint tileMaterialIndex = tileIndex * numDispatchMaterials + dispatchMaterialID;
+
+#if USE_WAVE_SCALARIZATION
+	// Collapse same key lanes within a wave to one atomic per unique key
+	bool pending = true;
+	for (uint guard = 0u; guard < COMPUTE_SHADE_GROUP_SIZE; ++guard)
+	{
+		uint uniformIndex = WaveActiveMin(pending ? tileMaterialIndex : 0xFFFFFFFFu);
+		if (uniformIndex == 0xFFFFFFFFu)
+		{
+			break;
+		}
+		bool match = pending && (uniformIndex == tileMaterialIndex);
+		uint matchCount = WaveActiveCountBits(match);
+		if (match && WavePrefixCountBits(match) == 0u)
+		{
+			uint previousCount = 0u;
+			AtomicAdd(gPixelTileMaterialCountOffsets[tileMaterialIndex], matchCount, previousCount);
+		}
+		if (match)
+		{
+			pending = false;
+		}
+	}
+#else
+	uint previousCount = 0u;
+	AtomicAdd(gPixelTileMaterialCountOffsets[tileMaterialIndex], 1u, previousCount);
+#endif
+	RETURN();
+}
