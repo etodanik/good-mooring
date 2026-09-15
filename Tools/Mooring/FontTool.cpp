@@ -1,7 +1,7 @@
 // The directory helpers follow Forge's AssetPipeline.cpp (Apache-2.0).
-#include "Common_3/Tools/AssetPipeline/src/AssetPipeline.h"
-#include "Common_3/Utilities/Interfaces/ILog.h"
-#include "Common_3/Utilities/Interfaces/IMemory.h"
+#include "Common/Tools/AssetPipeline/src/AssetPipeline.h"
+#include "Common/Utilities/Interfaces/ILog.h"
+#include "Common/Utilities/Interfaces/IMemory.h"
 
 void CreateDirectoryForFile(TFResourceDirectory directory, const char* filename)
 {
@@ -10,25 +10,30 @@ void CreateDirectoryForFile(TFResourceDirectory directory, const char* filename)
     fsCreateDirectory(directory, parent, true);
 }
 
-void DirectorySearch(TFResourceDirectory directory, const char* subDir, const char* extension,
-                     OnFind callback, void* context, bool recursive)
+void DirectorySearch(TFResourceDirectory directory, const char* subDir, const char* extension, OnFind callback, void* context,
+                     bool recursive)
 {
     char** files = nullptr;
-    int count = 0;
+    int    count = 0;
     fsGetFilesWithExtension(directory, subDir ? subDir : "", extension, &files, &count);
-    for (int i = 0; i < count; ++i) if (files[i]) callback(directory, files[i], context);
+    for (int i = 0; i < count; ++i)
+        if (files[i])
+            callback(directory, files[i], context);
     tf_free(files);
-    if (!recursive) return;
+    if (!recursive)
+        return;
     char** folders = nullptr;
     fsGetSubDirectories(directory, subDir ? subDir : "", &folders, &count);
     for (int i = 0; i < count; ++i)
-        if (folders[i]) DirectorySearch(directory, folders[i], extension, callback, context, true);
+        if (folders[i])
+            DirectorySearch(directory, folders[i], extension, callback, context, true);
     tf_free(folders);
 }
 
 int main(int argc, const char** argv)
 {
-    if (argc != 3) return 2;
+    if (argc != 3)
+        return 2;
     initMemAlloc("MooringFontTool");
     TFFileSystemInitDesc fs = {};
     fs.mIsTool = true;

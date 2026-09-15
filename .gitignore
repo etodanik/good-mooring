@@ -21,8 +21,8 @@ CMakeUserPresets.json
 /compile_commands.json
 
 # Headers regenerated from MathShaders.list by the MooringMath build target
-/Common_3/Utilities/Math/MathLibrary.h
-/Common_3/Tools/ForgeShadingLanguage/includes/MathLibrary.h
+/Common/Utilities/Math/MathLibrary.h
+/Common/Tools/ForgeShadingLanguage/includes/MathLibrary.h
 
 # Xcode user state and generated diagnostics; keep shared projects and schemes
 xcuserdata/
@@ -33,13 +33,12 @@ xcuserdata/
 *.dSYM/
 
 # Local profiling captures and runtime reports
+*.log
+*.memleaks
 *.tracy
 *.trace
 *.gputrace
-*.memleaks
-/MooringSimulator*.log
-/Mooring*Tests*.log
-/MooringFontTool*.log
+/QA/
 
 # Python tooling caches and local environments
 __pycache__/

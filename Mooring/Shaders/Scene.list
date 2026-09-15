@@ -1,0 +1,13 @@
+#include "../../Common/Graphics/FSL/defaults.h"
+#vert marina.vert
+#include "Scene.vert.fsl"
+#end
+#frag marina.frag
+#include "Scene.frag.fsl"
+#end
+#vert marina_post.vert
+#include "Post.vert.fsl"
+#end
+#frag marina_post.frag
+#include "Post.frag.fsl"
+#end

@@ -1,5 +1,5 @@
---- a/Common_3/Graphics/Metal/MetalRenderer.mm
-+++ b/Common_3/Graphics/Metal/MetalRenderer.mm
+--- a/Common/Graphics/Metal/MetalRenderer.mm
++++ b/Common/Graphics/Metal/MetalRenderer.mm
 @@ -59,16 +59,19 @@
  
  #include "../../Utilities/Interfaces/ILog.h"
@@ -1217,8 +1217,8 @@
      *ppTexture = pTexture;
  }
  
---- a/Common_3/Graphics/Metal/MetalConfig.h
-+++ b/Common_3/Graphics/Metal/MetalConfig.h
+--- a/Common/Graphics/Metal/MetalConfig.h
++++ b/Common/Graphics/Metal/MetalConfig.h
 @@ -31,3 +31,6 @@
  #import <MetalKit/MetalKit.h>
  
@@ -1226,8 +1226,8 @@
 +
 +// The mooring PoC uses rasterization and compute.
 +#undef MTL_RAYTRACING_AVAILABLE
---- a/Common_3/Graphics/Metal/MetalAvailabilityMacros.h
-+++ b/Common_3/Graphics/Metal/MetalAvailabilityMacros.h
+--- a/Common/Graphics/Metal/MetalAvailabilityMacros.h
++++ b/Common/Graphics/Metal/MetalAvailabilityMacros.h
 @@ -88,6 +88,10 @@
  
  // macOS
@@ -1239,8 +1239,8 @@
  #if MAC_OS_X_VERSION_MAX_ALLOWED < 110000
  #error("Please only compile with macOS SDK version 11 or higher")
  #endif
---- a/Common_3/OS/Darwin/iOSWindow.mm
-+++ b/Common_3/OS/Darwin/iOSWindow.mm
+--- a/Common/OS/Darwin/iOSWindow.mm
++++ b/Common/OS/Darwin/iOSWindow.mm
 @@ -38,7 +38,7 @@
  #include "../Interfaces/IOperatingSystem.h"
  #include "../Interfaces/IInput.h"
@@ -1250,8 +1250,8 @@
  
  IApp* pWindowAppRef = NULL;
  
---- a/Common_3/OS/Darwin/CocoaFileSystem.mm
-+++ b/Common_3/OS/Darwin/CocoaFileSystem.mm
+--- a/Common/OS/Darwin/CocoaFileSystem.mm
++++ b/Common/OS/Darwin/CocoaFileSystem.mm
 @@ -26,7 +26,7 @@
  
  #import <Foundation/Foundation.h>
@@ -1261,8 +1261,8 @@
  #include "../../Utilities/Interfaces/ILog.h"
  #include "../Interfaces/IOperatingSystem.h"
  
---- a/Common_3/OS/Darwin/DarwinInput.mm
-+++ b/Common_3/OS/Darwin/DarwinInput.mm
+--- a/Common/OS/Darwin/DarwinInput.mm
++++ b/Common/OS/Darwin/DarwinInput.mm
 @@ -26,7 +26,7 @@
  #include "../../Utilities/Interfaces/ILog.h"
  #include "../../Utilities/Interfaces/IThread.h"
@@ -1363,8 +1363,8 @@
      // Raw mouse delta
      gInputValues[MOUSE_DX] = gRawMouseDelta[0];
      gInputValues[MOUSE_DY] = gRawMouseDelta[1];
---- a/Common_3/OS/Darwin/DarwinThread.c
-+++ b/Common_3/OS/Darwin/DarwinThread.c
+--- a/Common/OS/Darwin/DarwinThread.c
++++ b/Common/OS/Darwin/DarwinThread.c
 @@ -50,7 +50,11 @@
  
  void callOnce(CallOnceGuard* pGuard, CallOnceFn pFn) { pthread_once(pGuard, pFn); }
@@ -1508,8 +1508,8 @@
  
  void detachThread(ThreadHandle handle) { pthread_detach(handle); }
  
---- a/Common_3/OS/Darwin/macOSAppDelegate.m
-+++ b/Common_3/OS/Darwin/macOSAppDelegate.m
+--- a/Common/OS/Darwin/macOSAppDelegate.m
++++ b/Common/OS/Darwin/macOSAppDelegate.m
 @@ -47,7 +47,7 @@
  @implementation AppDelegate
  {
@@ -1556,8 +1556,8 @@
      if (systemSleepAssertionID > 0)
      {
          IOPMAssertionRelease(systemSleepAssertionID);
---- a/Common_3/OS/Darwin/iOSBase.mm
-+++ b/Common_3/OS/Darwin/iOSBase.mm
+--- a/Common/OS/Darwin/iOSBase.mm
++++ b/Common/OS/Darwin/iOSBase.mm
 @@ -40,7 +40,7 @@
  #include "../../Application/Interfaces/IUI.h"
  #include "../../Game/Interfaces/IScripting.h"
@@ -1576,8 +1576,8 @@
  
  #import "iOSAppDelegate.h"
  
---- a/Common_3/OS/Darwin/macOSBase.mm
-+++ b/Common_3/OS/Darwin/macOSBase.mm
+--- a/Common/OS/Darwin/macOSBase.mm
++++ b/Common/OS/Darwin/macOSBase.mm
 @@ -23,6 +23,7 @@
   */
  
@@ -1767,8 +1767,8 @@
      pApp->Unload(&gReloadDescriptor);
      pApp->Exit();
  
---- a/Common_3/OS/Darwin/macOSWindow.mm
-+++ b/Common_3/OS/Darwin/macOSWindow.mm
+--- a/Common/OS/Darwin/macOSWindow.mm
++++ b/Common/OS/Darwin/macOSWindow.mm
 @@ -40,7 +40,7 @@
  #include "../Interfaces/IOperatingSystem.h"
  
@@ -1873,8 +1873,8 @@
  
      [window setAcceptsMouseMovedEvents:YES];
      [window setTitle:[NSString stringWithUTF8String:app_name]];
---- a/Common_3/Graphics/FSL/metal_srt.h
-+++ b/Common_3/Graphics/FSL/metal_srt.h
+--- a/Common/Graphics/FSL/metal_srt.h
++++ b/Common/Graphics/FSL/metal_srt.h
 @@ -82,13 +82,13 @@
  #define SRT_SET_DESC(srt, freq, maxSets, nodeIndex)                                                                                 \
      {                                                                                                                               \
@@ -1891,8 +1891,8 @@
      }
  
  #define IS_AB_RES(is_ab) (is_ab & (isParamsOnly() ? 0u : 1u))
---- a/Common_3/Graphics/ThirdParty/OpenSource/VulkanMemoryAllocator/TFVulkanMemoryAllocatorConfig.h
-+++ b/Common_3/Graphics/ThirdParty/OpenSource/VulkanMemoryAllocator/TFVulkanMemoryAllocatorConfig.h
+--- a/Common/Graphics/ThirdParty/OpenSource/VulkanMemoryAllocator/TFVulkanMemoryAllocatorConfig.h
++++ b/Common/Graphics/ThirdParty/OpenSource/VulkanMemoryAllocator/TFVulkanMemoryAllocatorConfig.h
 @@ -73,7 +73,7 @@
  	void Unlock() { releaseMutex(&mMutex); }
  	bool TryLock() { return tryAcquireMutex(&mMutex); }
@@ -1911,8 +1911,8 @@
  };
  
  #define VMA_RW_MUTEX TFVmaRWMutex
---- a/Common_3/Tools/ForgeShadingLanguage/generators/metal.py
-+++ b/Common_3/Tools/ForgeShadingLanguage/generators/metal.py
+--- a/Common/Tools/ForgeShadingLanguage/generators/metal.py
++++ b/Common/Tools/ForgeShadingLanguage/generators/metal.py
 @@ -77,7 +77,7 @@
      shader_src += ['#include "includes/metal.h"\n']
  
@@ -2002,8 +2002,8 @@
                  shader_src[i] = line
      
      # optimization pass for generated code
---- a/Common_3/Tools/ForgeShadingLanguage/includes/metal.h
-+++ b/Common_3/Tools/ForgeShadingLanguage/includes/metal.h
+--- a/Common/Tools/ForgeShadingLanguage/includes/metal.h
++++ b/Common/Tools/ForgeShadingLanguage/includes/metal.h
 @@ -417,6 +417,7 @@
  #define NO_SAMPLER 0u
  
@@ -2022,7 +2022,7 @@
      #define VR_VIEW_ID 0
  #endif
 --- /dev/null
-+++ b/Common_3/Graphics/Metal/MetalDescriptors.h
++++ b/Common/Graphics/Metal/MetalDescriptors.h
 @@ -0,0 +1,69 @@
 +// Apple compatibility layer for the explicit view API in Forge 5abcdd9.
 +// Included by MetalRenderer.mm after the native types and allocation hooks.

@@ -6,16 +6,14 @@ Normal builds exclude Tracy. Profiling builds use on-demand recording by default
 
 ## Build
 
-From the repository root, generate a separate profiling project:
+From the repository root, generate a separate profiling project. `MOORING_PROFILE`
+enables Tracy and exposes the `MooringProfile` run target:
 
 ```sh
-cmake -S . -B build/mac-tracy -G Xcode \
-  -DCMAKE_OSX_ARCHITECTURES=arm64 -DMOORING_TRACY=ON
+cmake -S . -B build/profile -G Xcode \
+  -DCMAKE_OSX_ARCHITECTURES=arm64 -DMOORING_PROFILE=ON
 
-xcodebuildmcp macos build \
-  --project-path "$PWD/build/mac-tracy/MooringSimulator.xcodeproj" \
-  --scheme MooringSimulator --configuration Debug \
-  --derived-data-path "$PWD/build/DerivedDataTracy" --arch arm64
+cmake --build build/profile --config Debug --target MooringSimulator
 ```
 
 For optimized measurements, use `--configuration Release`. Symbols and frame pointers remain available.
@@ -40,12 +38,17 @@ An allocation depth of zero retains allocation events without callstacks.
 Use the Tracy 0.14.1 profiler GUI. Connect to `127.0.0.1:8086`.
 The version must match the application client.
 
-Launch the application:
+Launch the application, or use `MooringProfile` for the repeatable benchmark:
 
 ```sh
-xcodebuildmcp macos launch \
-  --app-path "$PWD/build/mac-tracy/Debug/MooringSimulator.app" \
-  --json '{"launchArgs":["--tracy-wait","--tracy-images=15"]}'
+open "$PWD/build/profile/Debug/MooringSimulator.app" --args \
+  --tracy-wait --tracy-images=15
+```
+
+For the benchmark target:
+
+```sh
+cmake --build build/profile --config Debug --target MooringProfile
 ```
 
 `--tracy-wait` waits up to 30 seconds before application initialization.
@@ -72,7 +75,7 @@ Build the official capture tool and the local trace inspector:
 ```sh
 cmake -S Tools/Mooring/TracyTools -B build/tracy-tools \
   -DCMAKE_BUILD_TYPE=Release \
-  -DTRACY_SOURCE_DIR="$PWD/build/mac-tracy/_deps/tracy-src"
+  -DTRACY_SOURCE_DIR="$PWD/build/profile/_deps/tracy-src"
 cmake --build build/tracy-tools --target tracy-capture mooring-tracy-inspect -j8
 ```
 
@@ -174,16 +177,13 @@ At application shutdown, the client drains events before thread-local storage di
 Build the protocol tests:
 
 ```sh
-xcodebuildmcp macos build \
-  --project-path "$PWD/build/mac-tracy/MooringSimulator.xcodeproj" \
-  --scheme MooringTracyTests --configuration Debug \
-  --derived-data-path "$PWD/build/DerivedDataTracy" --arch arm64
+cmake --build build/profile --config Debug --target MooringTracyTests
 ```
 
 Start a capture. Then run four test rounds:
 
 ```sh
-build/mac-tracy/Debug/MooringTracyTests 4 wait
+build/profile/Debug/MooringTracyTests 4 wait
 build/tracy-tools/mooring-tracy-inspect build/locks.tracy --clean-memory
 ```
 

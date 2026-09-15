@@ -12,12 +12,12 @@ parser.add_argument('--output', type=Path, required=True)
 parser.add_argument('--font-tool', type=Path, required=True)
 args = parser.parse_args()
 root, output = args.root.resolve(), args.output.resolve()
-source = root / 'Examples_3/Unit_Tests/src/40_MooringSimulator'
-fsl = root / 'Common_3/Tools/ForgeShadingLanguage/fsl.py'
+source = root / 'Mooring'
+fsl = root / 'Common/Tools/ForgeShadingLanguage/fsl.py'
 shader_lists = [
-    root / 'Common_3/Application/UI/Shaders/FSL/UIShaders.list',
-    root / 'Common_3/Application/Fonts/Shaders/FSL/FontShader.list',
-    root / 'Common_3/Application/Screenshot/Shaders/FSL/ScreenshotShaders.list',
+    root / 'Common/Application/UI/Shaders/FSL/UIShaders.list',
+    root / 'Common/Application/Fonts/Shaders/FSL/FontShader.list',
+    root / 'Common/Application/Screenshot/Shaders/FSL/ScreenshotShaders.list',
 ]
 shader_lists += sorted((source / 'Shaders').glob('*.list'))
 for header in (source / 'Shaders').glob('*.srt.h'):

@@ -1,5 +1,5 @@
---- a/Common_3/Application/Fonts/FontSystem.cpp
-+++ b/Common_3/Application/Fonts/FontSystem.cpp
+--- a/Common/Application/Fonts/FontSystem.cpp
++++ b/Common/Application/Fonts/FontSystem.cpp
 @@ -1074,7 +1074,10 @@
  float fntGetRatio(TFFont* pFont, float fontSize)
  {
@@ -19,8 +19,8 @@
 -}
 \ No newline at end of file
 +}
---- a/Common_3/Application/Interfaces/IFont.h
-+++ b/Common_3/Application/Interfaces/IFont.h
+--- a/Common/Application/Interfaces/IFont.h
++++ b/Common/Application/Interfaces/IFont.h
 @@ -61,6 +61,9 @@
      uint32_t mMSDFGlyphStride;
      uint32_t mMSDFGlyphCount;
@@ -38,8 +38,8 @@
 -#endif
 \ No newline at end of file
 +#endif
---- a/Common_3/Application/Profiler/ProfilerBase.cpp
-+++ b/Common_3/Application/Profiler/ProfilerBase.cpp
+--- a/Common/Application/Profiler/ProfilerBase.cpp
++++ b/Common/Application/Profiler/ProfilerBase.cpp
 @@ -1027,7 +1027,9 @@
              varDesc.pLabel = timerInfo.pName;
              varDesc.mWidgetType = TF_WIDGET_TYPE_CHECKBOX;
@@ -105,8 +105,8 @@
  
      luaFuncDesc.mType = TF_LUA_WIDGET_FUNCTION_ON_EDITED;
      luaFuncDesc.pLabel = "Dump Profile";
---- a/Common_3/Application/Screenshot/Screenshot.cpp
-+++ b/Common_3/Application/Screenshot/Screenshot.cpp
+--- a/Common/Application/Screenshot/Screenshot.cpp
++++ b/Common/Application/Screenshot/Screenshot.cpp
 @@ -313,6 +313,7 @@
  
  void captureScreenshot(TFScreenshotDesc* pDesc)
@@ -115,8 +115,8 @@
  #ifdef ENABLE_SCREENSHOT
      ASSERT(pScreenshotCapturer);
  
---- a/Common_3/Graphics/Interfaces/IGraphics.h
-+++ b/Common_3/Graphics/Interfaces/IGraphics.h
+--- a/Common/Graphics/Interfaces/IGraphics.h
++++ b/Common/Graphics/Interfaces/IGraphics.h
 @@ -1529,6 +1529,9 @@
  #if defined(METAL)
      struct
@@ -137,8 +137,8 @@
          id<MTLCommandQueue> pCommandQueue;
          id<MTLFence>        pQueueFence;
          uint32_t            mBarrierFlags;
---- a/Common_3/OS/ThirdParty/OpenSource/hidapi/mac/hid.c
-+++ b/Common_3/OS/ThirdParty/OpenSource/hidapi/mac/hid.c
+--- a/Common/OS/ThirdParty/OpenSource/hidapi/mac/hid.c
++++ b/Common/OS/ThirdParty/OpenSource/hidapi/mac/hid.c
 @@ -30,8 +30,8 @@
  
  #include "../hidapi.h"
@@ -150,8 +150,8 @@
  
  /* As defined in AppKit.h, but we don't need the entire AppKit for a single constant. */
  extern const double NSAppKitVersionNumber;
---- a/Common_3/Resources/ResourceLoader/ResourceLoader.cpp
-+++ b/Common_3/Resources/ResourceLoader/ResourceLoader.cpp
+--- a/Common/Resources/ResourceLoader/ResourceLoader.cpp
++++ b/Common/Resources/ResourceLoader/ResourceLoader.cpp
 @@ -2267,7 +2267,9 @@
      uint32_t rowBytes = 0;
      uint32_t numRows = 0;
@@ -283,8 +283,8 @@
      TFBinaryShaderDesc binaryDesc = {};
  
      ShaderByteCodeBuffer shaderByteCodeBuffer = {};
---- a/Common_3/Tools/AssetPipeline/src/AssetPipeline_Fonts.cpp
-+++ b/Common_3/Tools/AssetPipeline/src/AssetPipeline_Fonts.cpp
+--- a/Common/Tools/AssetPipeline/src/AssetPipeline_Fonts.cpp
++++ b/Common/Tools/AssetPipeline/src/AssetPipeline_Fonts.cpp
 @@ -988,7 +988,7 @@
      // process pVerts into series of contour-specific edge lists
      float2   initial = { 0, 0 }; // fix this?
@@ -294,8 +294,8 @@
      for (int32_t i = 0; i < contourCount; i++)
      {
          int32_t count = pContours[i].mEnd - pContours[i].mStart;
---- a/Common_3/Tools/ForgeShadingLanguage/fsl.py
-+++ b/Common_3/Tools/ForgeShadingLanguage/fsl.py
+--- a/Common/Tools/ForgeShadingLanguage/fsl.py
++++ b/Common/Tools/ForgeShadingLanguage/fsl.py
 @@ -199,9 +199,9 @@
              bin_dir = os.path.join(args.binaryDestination, platform.name)
              os.makedirs(bin_dir, exist_ok=True)
@@ -309,8 +309,8 @@
      exit_code = 0
  
      if args.mp:
---- a/Common_3/Tools/ForgeShadingLanguage/generators/__init__.py
-+++ b/Common_3/Tools/ForgeShadingLanguage/generators/__init__.py
+--- a/Common/Tools/ForgeShadingLanguage/generators/__init__.py
++++ b/Common/Tools/ForgeShadingLanguage/generators/__init__.py
 @@ -22,8 +22,8 @@
  
  try:
@@ -323,8 +323,8 @@
 \ No newline at end of file
 +from .ispc import *
 +from .metal import *
---- a/Common_3/Tools/ForgeShadingLanguage/utils.py
-+++ b/Common_3/Tools/ForgeShadingLanguage/utils.py
+--- a/Common/Tools/ForgeShadingLanguage/utils.py
++++ b/Common/Tools/ForgeShadingLanguage/utils.py
 @@ -1154,4 +1154,9 @@
  
  def clang_format_file(path):
@@ -335,8 +335,8 @@
 +        if not clang_format_path:
 +            return # Formatting does not change the generated program.
      subprocess.run([clang_format_path, "-i", path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
---- a/Common_3/Utilities/FileSystem/FileSystem.c
-+++ b/Common_3/Utilities/FileSystem/FileSystem.c
+--- a/Common/Utilities/FileSystem/FileSystem.c
++++ b/Common/Utilities/FileSystem/FileSystem.c
 @@ -454,6 +454,7 @@
  /// to read from or modify the file. May return NULL if the file could not be opened.
  bool fsOpenStreamFromPath(TFResourceDirectory resourceDir, const char* fileName, TFFileMode mode, TFFileStream* pOut)
@@ -345,8 +345,8 @@
      TFIFileSystem* io = gResourceDirectories[resourceDir].pIO;
      return io->Open(io, resourceDir, fileName, mode, pOut);
  }
---- a/Common_3/Utilities/FileSystem/UnixFileSystem.c
-+++ b/Common_3/Utilities/FileSystem/UnixFileSystem.c
+--- a/Common/Utilities/FileSystem/UnixFileSystem.c
++++ b/Common/Utilities/FileSystem/UnixFileSystem.c
 @@ -75,6 +75,8 @@
  
  static bool ioUnixFsOpen(TFIFileSystem* io, const TFResourceDirectory rd, const char* fileName, TFFileMode mode, TFFileStream* fs)
@@ -407,8 +407,8 @@
      __FS_NO_ERR;
      if (!(fs->mMode & TF_FM_WRITE))
          return true;
---- a/Common_3/Utilities/Interfaces/IThread.h
-+++ b/Common_3/Utilities/Interfaces/IThread.h
+--- a/Common/Utilities/Interfaces/IThread.h
++++ b/Common/Utilities/Interfaces/IThread.h
 @@ -113,11 +113,18 @@
      pthread_mutex_t pHandle;
      uint32_t        mSpinCount;
@@ -428,8 +428,8 @@
      FORGE_API void exitMutex(TFMutex* pMutex);
  
      FORGE_API void acquireMutex(TFMutex* pMutex);
---- a/Common_3/Utilities/Log/Log.c
-+++ b/Common_3/Utilities/Log/Log.c
+--- a/Common/Utilities/Log/Log.c
++++ b/Common/Utilities/Log/Log.c
 @@ -259,6 +259,7 @@
      offset = (offset > LOG_MAX_BUFFER) ? LOG_MAX_BUFFER : offset;
      gLogBuffer[offset] = '\n';
@@ -446,8 +446,8 @@
  
      if (gConsoleLogging)
      {
---- a/Common_3/Utilities/MemoryTracking/MemoryTracking.c
-+++ b/Common_3/Utilities/MemoryTracking/MemoryTracking.c
+--- a/Common/Utilities/MemoryTracking/MemoryTracking.c
++++ b/Common/Utilities/MemoryTracking/MemoryTracking.c
 @@ -112,6 +112,15 @@
  #else // defined(ENABLE_MEMORY_TRACKING)
  
@@ -539,8 +539,8 @@
  #ifdef _MSC_VER
      _aligned_free(ptr);
  #else
---- a/Common_3/Utilities/ThirdParty/OpenSource/FluidStudios/MemoryManager/mmgr.c
-+++ b/Common_3/Utilities/ThirdParty/OpenSource/FluidStudios/MemoryManager/mmgr.c
+--- a/Common/Utilities/ThirdParty/OpenSource/FluidStudios/MemoryManager/mmgr.c
++++ b/Common/Utilities/ThirdParty/OpenSource/FluidStudios/MemoryManager/mmgr.c
 @@ -870,6 +870,7 @@
      CloseHandle(gProcessHandle);
  #endif
@@ -574,8 +574,8 @@
          free(au->actualAddress);
  
          // Remove this allocation unit from the hash table
---- a/Common_3/Utilities/Threading/ThreadSystem.c
-+++ b/Common_3/Utilities/Threading/ThreadSystem.c
+--- a/Common/Utilities/Threading/ThreadSystem.c
++++ b/Common/Utilities/Threading/ThreadSystem.c
 @@ -138,6 +138,8 @@
      {
          if (task.func)

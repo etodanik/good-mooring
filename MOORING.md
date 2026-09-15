@@ -6,24 +6,23 @@ The native Mac application contains one vessel, one dock, a seabed, and a contin
 
 ## Build and run
 
-Use an Apple Silicon Mac with the full Xcode application and Metal compiler installed. This build was checked with Xcode 26.5 on macOS 26.6.2. Install CMake, Python 3, and the XcodeBuildMCP CLI.
+Use an Apple Silicon Mac with the full Xcode application and Metal compiler installed. This build was checked with Xcode 26.5 on macOS 26.6.2. Install CMake and Python 3. The XcodeBuildMCP CLI is optional and only needed for UI launch automation.
 
 From this directory, generate the project:
 
 ```sh
-cmake -S . -B build/mac -G Xcode -DCMAKE_OSX_ARCHITECTURES=arm64
+cmake -S . -B build/macos -G Xcode -DCMAKE_OSX_ARCHITECTURES=arm64
 ```
 
 Build and launch the application:
 
 ```sh
-xcodebuildmcp macos build-and-run \
-  --project-path "$PWD/build/mac/MooringSimulator.xcodeproj" \
-  --scheme MooringSimulator --configuration Debug \
-  --derived-data-path "$PWD/build/DerivedData" --arch arm64 --output text
+cmake --build build/macos --config Debug --target MooringSimulator
 ```
 
-The application is `build/mac/Debug/MooringSimulator.app`. The build compiles FSL shaders and converts the bundled font. The application checks required resources before initialization.
+The application is `build/macos/Debug/MooringSimulator.app`. The build compiles FSL shaders and converts the bundled font. The application checks required resources before initialization.
+
+To launch the bundle from a terminal, run `open build/macos/Debug/MooringSimulator.app`.
 
 The [Tracy guide](Docs/TRACY.md) covers CPU and GPU captures, memory, locks, frame images, and profiling build configuration.
 
@@ -93,26 +92,31 @@ Exact hull offsets, payload distribution, inertia, wind areas, propeller dimensi
 
 ## Settings and source
 
-Edit `Examples_3/Unit_Tests/src/40_MooringSimulator/Assets/Data/physics.ini`, then rebuild and restart. Settings load at startup. They are not watched while the application runs.
+Edit `Mooring/Assets/Data/physics.ini`, then rebuild and restart. Settings load at startup. They are not watched while the application runs.
 
 Distances use metres, time uses seconds, and speeds use metres per second. World +Y is up; an unrotated vessel's +X is starboard and +Z is forward. Wind and swell directions specify travel **toward** an angle, measured from +X toward +Z.
 
-Vessel definitions are in `Simulation/Hydrodynamics.cpp` under the example directory. Volume cells, inertia, wind areas, props, and rudders are plain data. Each interactive system remains a small prototype for review.
+Vessel definitions are in `Mooring/Simulation/Hydrodynamics.cpp`. Volume cells, inertia, wind areas, props, and rudders are plain data. Each interactive system remains a small prototype for review.
 
 ## Verification
 
-Build each test scheme with the same project and build arguments above, using `macos build` instead of `macos build-and-run`:
+Build and run the regression suite with CTest:
 
 - `MooringTests`: station restrictions, travel, ten-minute simulation, powered handling, bounded commands, and repeated resets.
 - `MooringOceanTests`: direct-DFT reference, spectrum energy, deterministic seeds, dispersion, current advection, periodic boundaries, orbital velocity, packets, and a two-minute coupled run.
 - `MooringPhysicsTests`: hydrostatic balance, restoring moment, motion decay, coasting, reverse thrust, differential thrust, wash arrival, steering, and grounding.
 
-Run the binaries:
+```sh
+cmake --build build/macos --config Debug --target MooringTestSuite
+ctest --test-dir build/macos -C Debug --output-on-failure
+```
+
+Run an individual binary when its output is useful:
 
 ```sh
-build/mac/Debug/MooringTests
-build/mac/Debug/MooringOceanTests
-build/mac/Debug/MooringPhysicsTests build/physics-calibration.csv
+build/macos/Debug/MooringTests
+build/macos/Debug/MooringOceanTests
+build/macos/Debug/MooringPhysicsTests build/macos/physics-calibration.csv
 ```
 
 The calibration CSV records simulated outcomes. It is a regression baseline, not measured sea-trial data.
@@ -136,7 +140,7 @@ The pins are recorded in `Tools/Mooring/dependencies.json`:
 
 Jolt's scratch patch uses 256 local body IDs. The physics system has the same 256-body limit. An increase requires another allocation audit.
 
-For a fresh upstream tree, restore Apple files from the pinned reference with `Tools/Mooring/restore_apple.py`. Copy the pinned Jolt source into `Common_3/Game/ThirdParty/OpenSource/Jolt`. Apply each compatibility patch from the repository root with `patch -p1`. The current workspace already contains these changes. Restoring upstream files again overwrites them.
+For a fresh upstream tree, restore Apple files from the pinned reference with `Tools/Mooring/restore_apple.py`. Copy the pinned Jolt source into `Common/Game/ThirdParty/OpenSource/Jolt`. Apply each compatibility patch from the repository root with `patch -p1`. The current workspace already contains these changes. Restoring upstream files again overwrites them.
 
 Mac packaging is implemented through the generated Xcode project. iOS source compatibility guides the port, but an iOS application target and device validation remain outside this checkpoint.
 

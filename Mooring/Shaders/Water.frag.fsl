@@ -1,0 +1,382 @@
+#include "Water.srt.h"
+#include "WaterSampling.h.fsl"
+#include "WaterLighting.h.fsl"
+#include "WaterShadow.h.fsl"
+#include "SkySampling.h.fsl"
+#include "FoamMaterial.h.fsl"
+#include "../../Common/Graphics/ShaderUtilities.h.fsl"
+STRUCT(WaterFragment)
+{
+    DATA(float4, position, SV_Position);
+    DATA(float3, world, TEXCOORD0);
+    DATA(float2, coordinate, TEXCOORD1);
+};
+float4 submergedScene(float2 uv,float waterHeight)
+{
+    // Reject foreground per texel before interpolation. Filtering depth and
+    // then testing it admitted bright rail/hull pixels mixed with the seabed.
+    float2 pixel=uv*gWater.screen.xy-.5, base=floor(pixel), fraction=frac(pixel);
+    float4 result=float4(0,0,0,0); float accepted=0;
+    for(uint y=0;y<2;y++) for(uint x=0;x<2;x++)
+    {
+        float2 at=(base+float2(x,y)+.5)/gWater.screen.xy;
+        float4 value=SampleLvlTex2D(gOpaque,gSamplerPointClamp,at,0);
+        float3 world=gWater.eye.xyz + cameraRay(at)*value.a;
+        if(value.a<=0 || world.y>waterHeight+.02) continue;
+        float weight=(x!=0?fraction.x:1-fraction.x)*(y!=0?fraction.y:1-fraction.y);
+        result+=value*weight; accepted+=weight;
+    }
+    return accepted>.001?result/accepted:float4(0,0,0,0);
+}
+float4 traceRefraction(float3 origin,float3 direction,float distance)
+{
+    uint steps=uint(gWater.trace.x);
+    float previous=0;
+    for(uint i=1;i<=steps;i++)
+    {
+        float fraction=float(i)/float(steps), t=distance*fraction*fraction;
+        float4 clip=mul(gWater.viewProjection,float4(origin+direction*t,1));
+        float2 uv=clip.xy/max(.1,clip.w)*float2(.5,-.5)+.5;
+        if(any(uv<=0) || any(uv>=1)) break;
+        float depth=SampleLvlTex2D(gOpaque,gSamplerPointClamp,uv,0).a;
+        if(depth!=0 && clip.w>=abs(depth))
+        {
+            // An endpoint lookup projects distant hull pixels onto unrelated
+            // water. Locate an actual ray/depth crossing before accepting color.
+            float low=previous, high=t;
+            for(uint refine=0;refine<6;refine++)
+            {
+                t=(low+high)*.5;
+                clip=mul(gWater.viewProjection,float4(origin+direction*t,1));
+                uv=clip.xy/clip.w*float2(.5,-.5)+.5;
+                depth=SampleLvlTex2D(gOpaque,gSamplerPointClamp,uv,0).a;
+                if(depth!=0 && clip.w>=abs(depth)) high=t; else low=t;
+            }
+            if(depth>0 && abs(clip.w-depth)<.12)
+            {
+                float4 hit=submergedScene(uv,origin.y);
+                if(hit.a>0) return float4(hit.rgb,t);
+            }
+            break; // Foreground obstruction or a discontinuous silhouette.
+        }
+        previous=t;
+    }
+    return float4(0,0,0,0);
+}
+float4 traceReflection(float3 origin,float3 direction)
+{
+    // Mirror the ray into the capture's coordinate system. The ray still
+    // starts on the actual wave and follows its normal, including wake slope.
+    origin+=direction*.04;
+    origin.y=2*gWater.surface.w-origin.y; direction.y=-direction.y;
+    float4 start=mul(gWater.viewProjection,float4(origin,1));
+    float4 end=mul(gWater.viewProjection,float4(origin+direction*60,1));
+    if(start.w<.2) return float4(0,0,0,0);
+    if(end.w<.2) end=lerp(start,end,(start.w-.2)/(start.w-end.w));
+    float2 first=start.xy/start.w*float2(.5,-.5)+.5;
+    float2 last=end.xy/end.w*float2(.5,-.5)+.5;
+    float2 resolution=ceil(gWater.screen.xy/gWater.trace.w);
+    float2 delta=last-first;
+    float enter=0, leave=1;
+    for(uint axis=0;axis<2;axis++) {
+        float lower=gWater.reflectionBounds[axis], upper=gWater.reflectionBounds[axis+2];
+        if(abs(delta[axis])<.000001) {
+            if(first[axis]<lower || first[axis]>upper) return float4(0,0,0,0);
+        } else {
+            float a=(lower-first[axis])/delta[axis], b=(upper-first[axis])/delta[axis];
+            enter=max(enter,min(a,b)); leave=min(leave,max(a,b));
+        }
+    }
+    if(leave<=enter) return float4(0,0,0,0);
+    float k0=lerp(1/start.w,1/end.w,enter), k1=lerp(1/start.w,1/end.w,leave);
+    first+=delta*enter; delta*=leave-enter;
+    float pixels=max(abs(delta.x)*resolution.x,abs(delta.y)*resolution.y);
+    float steps=min(gWater.trace.z,max(1.0,ceil(pixels)));
+    // Perspective-correct screen intervals (McGuire / Mara). A near-vertical
+    // view ray can cover a large depth interval in one pixel, even on flat sea.
+    for(float i=0;i<steps;i++)
+    {
+        float low=i/steps, high=(i+1)/steps;
+        float2 uv=first+delta*((low+high)*.5);
+        if(any(uv<=0) || any(uv>=1)) continue;
+        float depth=SampleLvlTex2D(gReflection,gSamplerPointClamp,uv,0).a;
+        float nearDepth=1/lerp(k0,k1,low), farDepth=1/lerp(k0,k1,high);
+        if(depth<=0 || depth<min(nearDepth,farDepth)-.08 || depth>max(nearDepth,farDepth)+.08) continue;
+        float at=abs(k1-k0)>.000001?saturate((1/depth-k0)/(k1-k0)):(low+high)*.5;
+        uv=first+delta*clamp(at,low,high);
+        // Filter radiance only across texels at the ray's depth. Background
+        // pixels contribute zero coverage; they never stretch a rail or hull.
+        float2 pixel=uv*resolution-.5, base=floor(pixel), fraction=frac(pixel);
+        float4 hit=float4(0,0,0,0);
+        float tolerance=.1+abs(farDepth-nearDepth)/max(1.0,pixels/steps);
+        for(uint y=0;y<2;y++) for(uint x=0;x<2;x++) {
+            float4 value=SampleLvlTex2D(gReflection,gSamplerPointClamp,(base+float2(x,y)+.5)/resolution,0);
+            float weight=(x!=0?fraction.x:1-fraction.x)*(y!=0?fraction.y:1-fraction.y);
+            weight*=value.a>0?1-smoothstep(tolerance,tolerance*2,abs(value.a-depth)):0;
+            hit+=float4(value.rgb,1)*weight;
+        }
+        float edge=saturate(min(min(uv.x,1-uv.x),min(uv.y,1-uv.y))*40);
+        if(hit.a>.001) return hit*edge;
+    }
+    return float4(0,0,0,0);
+}
+float4 PS_MAIN(WaterFragment input)
+{
+    INIT_MAIN;
+    float footprint=max(length(ddx(input.coordinate)),length(ddy(input.coordinate)));
+    float2 slope=float2(0,0); float variance=0, spectralFoam=0, compression=0, surfaceStretch=1;
+    for(uint band=0;band<3;band++)
+    {
+        float4 moments=sampleWater(input.coordinate,band,footprint*gWater.detail.x,true);
+        slope+=moments.xy;
+        variance+=max(0.0,moments.z-dot(moments.xy,moments.xy));
+        float4 surface=sampleWater(input.coordinate,band,footprint*gWater.detail.x,false);
+        spectralFoam+=surface.w;
+        compression+=1-moments.w;
+        surfaceStretch*=max(.2,moments.w);
+    }
+    float4 local=localWater(input.world.xz);
+    slope+=local.yz;
+    float4 foamHistory=localFoam(input.world.xz,false);
+    float persistentFoam=foamHistory.x;
+    // Approximate combined area from filtered band stretch and surface slope.
+    // Screen derivatives of the rasterized triangles imprinted mesh facets
+    // into foam density and changed them when the camera or window moved.
+    // The product neglects cross-band shear; local foam has its own divergence.
+    float3 worldDx=ddx(input.world), worldDy=ddy(input.world);
+    float concentration=clamp(rsqrt(1+dot(slope,slope))/max(.05,surfaceStretch),.25,4.0);
+    float spectralDensity=spectralFoam*concentration;
+    float4 whitewater=sampleWhitewater(input.coordinate,footprint*gWater.detail.x);
+    whitewater.xyz*=concentration;
+    whitewater+=localFoam(input.world.xz,true);
+    float foamAge=whitewater.x/max(.00001,spectralDensity+persistentFoam);
+    float fresh=saturate(whitewater.w+exp(-foamAge*1.2));
+    float3 surfaceNormal=normalize(float3(-slope.x,1,-slope.y));
+    float4 ripple=sampleWater(input.coordinate,3,footprint*gWater.detail.x,true);
+    float3 micro=float3(ripple.xy,max(0.0,ripple.z-dot(ripple.xy,ripple.xy)));
+    float microScale=gWater.detail.y*lerp(.5,1.0,smoothstep(5.0,14.0,gWater.wind.w));
+    slope+=micro.xy*microScale; variance+=micro.z*microScale*microScale;
+    float2 slopeDx=ddx(slope), slopeDy=ddy(slope);
+    variance+=(dot(slopeDx,slopeDx)+dot(slopeDy,slopeDy))/12;
+    float3 normal=normalize(float3(-slope.x,1,-slope.y));
+    float3 view=normalize(gWater.eye.xyz-input.world), light=gWater.sun.xyz;
+    // Filtered geometry can expose a back-facing fine normal. Reflect that
+    // normal into the visible hemisphere (Bruneton et al.) before the BRDF.
+    normal-=2*min(0.0,dot(normal,view))*view;
+    float facing=max(.02,dot(normal,view));
+    float3 ray=reflect(-view,normal);
+    float roughness=gWater.detail.z*lerp(.16,1.0,smoothstep(1.0,6.0,gWater.wind.w));
+    float alpha2=clamp(roughness*roughness+variance*.45,.000025,.3);
+    float fresnel=meanWaterFresnel(facing,variance+roughness*roughness);
+    float3 sky=sampleRoughSky(float3(ray.x,abs(ray.y),ray.z),uint(gWater.surface.x)*2,alpha2);
+    float4 clip=mul(gWater.viewProjection,float4(input.world,1));
+    float2 uv=input.position.xy/gWater.screen.xy;
+    float4 scene=SampleLvlTex2D(gOpaque,gSamplerPointClamp,uv,0);
+    scene.a=abs(scene.a);
+    // Alpha stores signed opaque view depth. Never sample a depth attachment
+    // while writing it, and never synchronously read it back to the CPU.
+    float viewDepth=clip.w;
+    float3 transmittedRay=refract(-view,normal,1.0/1.333);
+    transmittedRay=normalize(lerp(-view,transmittedRay,gWater.optics.z));
+    float path=max(0.0,input.world.y-gWater.surface.w+gWater.screen.w)/max(.05,-transmittedRay.y);
+    float4 refracted=traceRefraction(input.world,transmittedRay,min(path,50.0));
+    if(refracted.a>0) path=refracted.a;
+    float3 absorption=float3(.42,.12,.07);
+    float3 transmission=exp(-absorption*min(path,50.0));
+    float height=input.world.y-gWater.surface.w;
+    float objectShadow=shadowWater(input.world);
+    float clouds=cloudShadow(input.world,gWater.weather.x,gWater.screen.z,footprint,light);
+    float waveShadow=shadowWave(input.world,surfaceNormal);
+    float shadow=objectShadow*clouds*sunTransmission(gWater.weather.x);
+    float storm=smoothstep(.65,1.0,gWater.weather.x);
+    float3 deep=lerp(float3(.0015,.04,.05),float3(.002,.018,.023),storm);
+    // Single scattering along the refracted view ray. The water-only light
+    // depth pass supplies distance from the lit surface to each interior point.
+    // Wave height and compression do not independently paint a bright mask.
+    float3 scattering=float3(0,0,0); float lightThickness=0;
+    uint volumeSamples=uint(gWater.volume.y);
+    if(gWater.weather.w>0 || gWater.effects.w==32)
+    {
+        float mass=1-exp(-.32*min(path,18.0));
+        float phase=.12+4*waterPhase(dot(transmittedRay,light),.55);
+        for(uint i=0;i<volumeSamples;i++)
+        {
+            float t=-log(max(.0001,1-(float(i)+.5)/float(volumeSamples)*mass))/.32;
+            float3 point=input.world+transmittedRay*t;
+            float flatPath=max(0.0,input.world.y-point.y)/max(.05,light.y);
+            float distance=waterLightPath(point,flatPath);
+            float weight=mass/(.32*float(volumeSamples))*exp(.32*t);
+            // The deep-water tint already represents bulk scattering in a
+            // flat half-space. Add the change in transport caused by waves;
+            // counting the baseline again washes every trough in cyan.
+            float3 transmitted=exp(-absorption*(distance+t));
+            float3 flat=exp(-absorption*(flatPath+t));
+            scattering+=float3(.006,.105,.085)*(transmitted-flat)*weight;
+            lightThickness+=distance/float(volumeSamples);
+        }
+        // Overcast crests still receive diffuse skylight. This ambient
+        // approximation shares the measured wave path instead of adding an
+        // unrelated moving colour mask when direct sun is obscured.
+        float ambient=lerp(.07,.22,smoothstep(.35,.95,gWater.weather.x));
+        scattering*=(phase*shadow+ambient)*gWater.weather.w*gWater.volume.w;
+    }
+    // This marina has an authored flat seabed. Evaluate it analytically when
+    // it is hidden or off screen; a screen-space miss must not cut a dark shape
+    // into otherwise continuous bottom transmission.
+    float3 bottomPoint=input.world+transmittedRay*path;
+    float3 bottom=gWater.seabed.rgb*diffuseWaterScene(bottomPoint,float3(0,1,0),gWater.weather.x,gWater.screen.z,light);
+    if(refracted.a>0 && bottomPoint.y>gWater.surface.w-gWater.screen.w+.15) bottom=refracted.rgb;
+    float3 body=bottom*transmission*(.28+.72*shadow)+max(float3(0,0,0),deep*(1-transmission)+scattering);
+    // Air concentration and its depth moment travel independently of surface
+    // foam. A fresh plunge mixes deeper; remnants rise and clear over time.
+    float bubbleDepth=whitewater.z/max(.00001,whitewater.y);
+    float bubblePath=min(path,bubbleDepth/max(.2,-transmittedRay.y));
+    float bubbleTransmission=exp(-whitewater.y*5*bubblePath*gWater.volume.z);
+    float3 bubbleLight=float3(.055,.28,.22)*(.35+.65*shadow)*(1-bubbleTransmission);
+    body=body*bubbleTransmission+bubbleLight;
+    float3 underwaterRays=float3(0,0,0);
+    if(gWater.quality.y>0 && gWater.effects.x>0)
+    {
+        uint steps=uint(gWater.quality.y);
+        float length=min(path,12.0), shafts=0;
+        float mass=1-exp(-.32*length);
+        // Sample optical depth, concentrating work where transmitted light is
+        // strongest. Continuous pixel jitter prevents discrete shadow copies.
+        float jitter=hashWater(input.position.xy);
+        for(uint i=0;i<steps;i++)
+        {
+            float t=-log(max(.0001,1-(float(i)+jitter)/float(steps)*mass))/.32;
+            float3 samplePoint=input.world+transmittedRay*t;
+            // Cloud features span hundreds of metres; this ray is at most 12 m.
+            // Reuse its entry transmittance, retaining per-sample object shadows.
+            shafts+=shadowWater(samplePoint)*clouds*mass/(.32*float(steps));
+        }
+        underwaterRays=float3(.018,.11,.07)*shafts*waterPhase(dot(transmittedRay,light),.65)*gWater.effects.x*sunTransmission(gWater.weather.x);
+        body+=underwaterRays;
+    }
+    float4 reflected=float4(0,0,0,0);
+    if(gWater.optics.y>0 || gWater.effects.w==8 || gWater.effects.w==27) reflected=traceReflection(input.world,ray);
+    // Approximate one reflection from the surrounding mean sea. Its Fresnel
+    // response approaches the sky continuously at grazing angles; replacing
+    // every downward ray with body colour etched dark lines into wave faces.
+    float bounceFresnel=F_Schlick(float3(.02037,.02037,.02037),saturate(-ray.y)).x;
+    float3 skyReflection=lerp(body,sky,bounceFresnel);
+    float3 reflection=lerp(skyReflection,skyReflection*(1-reflected.a)+reflected.rgb,gWater.optics.y);
+    // Finite sun disk (closest point on a sphere) avoids pinprick highlights.
+    float3 centerToRay=dot(light,ray)*ray-light;
+    float3 areaLight=normalize(light+centerToRay*saturate(.00465/max(.00001,length(centerToRay))));
+    float3 halfVector=normalize(view+areaLight);
+    float nh=saturate(dot(normal,halfVector)), nl=saturate(dot(normal,areaLight));
+    float distribution=D_GGX(alpha2,nh);
+    float visibility=.5/max(.0001,nl*sqrt(alpha2+(1-alpha2)*facing*facing)+facing*sqrt(alpha2+(1-alpha2)*nl*nl));
+    float sunFresnel=F_Schlick(float3(.02037,.02037,.02037),saturate(dot(view,halfVector))).x;
+    float glint=distribution*visibility*sunFresnel*nl;
+    float3 color=body*(1-fresnel)+reflection*fresnel+float3(1,.86,.65)*glint*gWater.optics.x*shadow*waveShadow;
+    // Contact foam is restricted by actual opaque depth, so it follows the
+    // moving waterline. Breakup is advected with the surface rather than screen.
+    float contact=scene.a>0?(1-smoothstep(.02,.38,max(0.0,scene.a-viewDepth))):0.0;
+    float4 pattern=foamPattern(input.coordinate,foamHistory.zw,slope);
+    float lace=pattern.x, pores=smoothstep(.15,.75,pattern.y), patch=pattern.z, grain=pattern.w;
+    // Packet steepness is a source for the history, not an instant painted mask.
+    // Filtered density is an area average. Raising it to a power erased
+    // small crest sheets as they receded or crossed a mip transition.
+    float density=1-exp(-((spectralDensity+persistentFoam)*1.6+contact*gWater.optics.w)*gWater.weather.z);
+    // Fresh crests contain denser foam. Remnants break into patches at a
+    // larger scale than the bubble texture instead of covering every trough.
+    density*=lerp(.55+.45*patch,1.0,fresh);
+    float faded=saturate(density*smoothstep(.22-density*.11,.65-density*.4,lace+fresh*.2)*1.2);
+    // Density erodes the coverage of sheets instead of dimming an entire
+    // ribbon. Fine lace and larger, flow-warped holes survive at different ages.
+    float erosion=.035+.52*(1-lace)*(1-lace)+lerp(.08,.32,saturate(foamAge/5))*patch*patch;
+    float edgeWidth=max(.015,fwidth(erosion));
+    float eroded=smoothstep(erosion-edgeWidth,erosion+edgeWidth,density)*smoothstep(0.0,.03,density);
+    // Thresholding an averaged lace texel turns distant whitecaps into solid
+    // islands. Integrate unresolved coverage instead of thresholding its mean.
+    float unresolved=smoothstep(.12,.5,footprint*gWater.detail.w);
+    eroded=lerp(eroded,density,unresolved);
+    float cover=lerp(faded,eroded,gWater.foamAppearance.y);
+    // Coverage controls where a sheet survives. Its fine pores and internal
+    // relief remain visible even where the larger sheet is fully covered.
+    // A saturated source describes aeration, not an opaque coat of paint.
+    // Keep water visible between bubbles, including inside fresh crest sheets.
+    cover*=lerp(.15+.85*pores,.38+.62*pores,fresh);
+    // A breaking lip is dense churn; open bubble rims belong to its remnants.
+    // The instantaneous source selects this material, while transported density
+    // supplies its mass. Both stay attached to the displaced wave coordinates.
+    // Optical thickness retains pores inside dense caps; a threshold flattened
+    // their entire interior once the source exceeded its upper limit.
+    float churn=foamChurn(density,pattern);
+    churn=lerp(churn,density,unresolved);
+    // Young, aerated foam fills the surviving sheet. As its mass disperses,
+    // the same erosion opens holes rather than amplifying a faint history
+    // into a smooth opaque patch.
+    float aeration=saturate(whitewater.y*2+exp(-foamAge*.45)*smoothstep(.05,.4,density));
+    cover=lerp(cover,churn,max(smoothstep(.05,.65,whitewater.w),aeration));
+    float3 foamNormal=surfaceNormal;
+    if(gWater.foamAppearance.x>0)
+    {
+        float relief=cover*lerp(.55*lace+.45*pattern.y,grain,aeration)*gWater.foamAppearance.x;
+        float3 tangent=cross(worldDy,surfaceNormal), bitangent=cross(surfaceNormal,worldDx);
+        float determinant=dot(worldDx,tangent);
+        float3 gradient=(tangent*ddx(relief)+bitangent*ddy(relief))*sign(determinant)/max(.000001,abs(determinant));
+        // Cap unresolved relief slopes; texture mips already remove distant
+        // bubbles. This adds no mesh displacement or change to water queries.
+        gradient*=min(1.0,.45/max(.001,length(gradient)));
+        foamNormal=normalize(surfaceNormal-gradient);
+    }
+    float3 foamColor=shadeFoam(foamNormal,fresh,lerp(pores,grain,aeration),shadow*waveShadow);
+    color=lerp(color,foamColor,cover);
+    float fog=waterFog(length(gWater.eye.xyz-input.world),gWater.weather.y);
+    float3 horizon=sampleSky(normalize(input.world-gWater.eye.xyz),uint(gWater.surface.x)*2).rgb;
+    color=lerp(color,horizon,fog);
+    if(gWater.effects.w==1) color=lerp(float3(.03,.8,.4),float3(.9,.08,.02),saturate(log2(max(1.0,footprint*16))/6));
+    if(gWater.effects.w==2) color=float3(cover,cover,cover);
+    if(gWater.effects.w==3) color=normal*.5+.5;
+    if(gWater.effects.w==4) color=float3(spectralFoam,spectralFoam,spectralFoam);
+    if(gWater.effects.w==5) color=float3(persistentFoam,persistentFoam,persistentFoam);
+    if(gWater.effects.w==6) color=float3(contact,contact,contact);
+    if(gWater.effects.w==7) color=float3(objectShadow,objectShadow,objectShadow)*waveShadow;
+    if(gWater.effects.w==8) color=reflected.rgb;
+    if(gWater.effects.w==9) color=float3(saturate((scene.a-viewDepth)/10),saturate(scene.a/200),0);
+    if(gWater.effects.w==10) color=max(scattering,0.0)*3;
+    if(gWater.effects.w==11) color=bottom*transmission;
+    if(gWater.effects.w==12) color=float3(1,.86,.65)*glint*gWater.optics.x*shadow*waveShadow;
+    if(gWater.effects.w==13) color=underwaterRays*8;
+    if(gWater.effects.w==14) color=float3(clouds,clouds,clouds);
+    if(gWater.effects.w==15) color=float3(saturate(local.x*2),saturate(-local.x*2),0);
+    if(gWater.effects.w==16) color=float3(saturate(compression),saturate(1-compression),0);
+    if(gWater.effects.w==17) color=float3(micro.xy*microScale*4+.5,0);
+    if(gWater.effects.w==18 || gWater.effects.w==19 || gWater.effects.w==20 || gWater.effects.w>=38) color=float3(0,0,0);
+    if(gWater.effects.w==21) color=float3(fog,fog,fog);
+    if(gWater.effects.w==22) color=float3(saturate(height*.5),saturate(-height*.5),0);
+    if(gWater.effects.w==23) color=normalize(float3(-local.y*8,1,-local.z*8))*.5+.5;
+    if(gWater.effects.w==26) {
+        float3 geometry=normalize(cross(ddx(input.world),ddy(input.world)));
+        geometry*=geometry.y<0?-1.0:1.0;
+        color=float3(.7,.7,.7)*(.12+.88*saturate(dot(geometry,light)));
+    }
+    if(gWater.effects.w==27) color=float3(reflected.a,reflected.a,reflected.a);
+    if(gWater.effects.w==28) color=(foamNormal*.5+.5)*cover;
+    if(gWater.effects.w==29) color=float3(foamHistory.zw*.5+.5,saturate(persistentFoam));
+    if(gWater.effects.w==32) color=float3(lightThickness,lightThickness,lightThickness)/12;
+    if(gWater.effects.w==33) color=bubbleLight;
+    if(gWater.effects.w==34) color=float3(whitewater.w,whitewater.w,whitewater.w);
+    if(gWater.effects.w==35) color=lerp(float3(1,.15,.02),float3(.05,.25,1),saturate(foamAge/8))*saturate((spectralDensity+persistentFoam)*4);
+    if(gWater.effects.w==36) color=float3(saturate(whitewater.y),saturate(bubbleDepth)*smoothstep(0.0,.025,whitewater.y),0);
+    if(gWater.effects.w==41) {
+        color=float3(whitewater.w,whitewater.w,whitewater.w)*.12;
+        int2 cell=int2(floor(input.coordinate/WATER_CREST_CELL_SIZE));
+        for(int y=-1;y<=1;y++) for(int x=-1;x<=1;x++) {
+            uint2 at=uint2(cell+int2(x,y))&15u;
+            float4 source=gCrestDraw[at.y*16+at.x];
+            float marker=(1-smoothstep(.2,.45,distance(input.coordinate,source.xy)))*(source.w>0?1.0:0.0);
+            color+=marker*float3(source.z,saturate(source.w/2.5)*.5,.15);
+        }
+    }
+    if(gWater.effects.w==42) color=skyReflection*fresnel;
+    if(gWater.effects.w==43) color=body*(1-fresnel);
+    if(gWater.effects.w==44) color=float3(fresnel,fresnel,fresnel);
+    if(gWater.effects.w==4 || gWater.effects.w==5 || gWater.effects.w==10 || gWater.effects.w==12 || gWater.effects.w==13 || gWater.effects.w==15)
+        color*=gWater.trace.y;
+    RETURN(float4(color,viewDepth));
+}

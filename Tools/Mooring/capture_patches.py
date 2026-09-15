@@ -37,7 +37,7 @@ def main():
         current = (ROOT / name).read_bytes()
         if current != baseline:
             changes.append(difference(name, baseline, current))
-    name = 'Common_3/Graphics/Metal/MetalDescriptors.h'
+    name = 'Common/Graphics/Metal/MetalDescriptors.h'
     changes.append(difference(name, b'', (ROOT / name).read_bytes()))
     (output / 'apple-compat.patch').write_text(''.join(changes))
     print('Apple compatibility files:', len(changes))
@@ -46,7 +46,7 @@ def main():
         for member in archive:
             name = '/'.join(member.name.split('/')[1:])
             path = ROOT / name
-            if not member.isfile() or not name.startswith('Common_3/') or name in origin['sha256'] or not path.is_file():
+            if not member.isfile() or not name.startswith('Common/') or name in origin['sha256'] or not path.is_file():
                 continue
             if path.suffix not in ('.h', '.hpp', '.cpp', '.c', '.mm', '.m', '.py'):
                 continue
@@ -60,7 +60,7 @@ def main():
     with tarfile.open(args.jolt_archive) as archive:
         member = next(m for m in archive if m.name.endswith('/' + suffix))
         baseline = archive.extractfile(member).read()
-    name = 'Common_3/Game/ThirdParty/OpenSource/Jolt/' + suffix
+    name = 'Common/Game/ThirdParty/OpenSource/Jolt/' + suffix
     (output / 'jolt-bounded-broadphase.patch').write_text(difference(name, baseline, (ROOT / name).read_bytes()))
     print('Jolt compatibility files: 1')
 

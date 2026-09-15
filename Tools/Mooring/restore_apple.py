@@ -12,12 +12,12 @@ import re
 
 ROOT = Path(__file__).resolve().parents[2]
 FILES = [
-    'Common_3/Graphics/Metal',
-    'Common_3/OS/Darwin',
-    'Common_3/Graphics/FSL/metal_srt.h',
-    'Common_3/Graphics/ThirdParty/OpenSource/VulkanMemoryAllocator',
-    'Common_3/Tools/ForgeShadingLanguage/generators/metal.py',
-    'Common_3/Tools/ForgeShadingLanguage/includes/metal.h',
+    'Common/Graphics/Metal',
+    'Common/OS/Darwin',
+    'Common/Graphics/FSL/metal_srt.h',
+    'Common/Graphics/ThirdParty/OpenSource/VulkanMemoryAllocator',
+    'Common/Tools/ForgeShadingLanguage/generators/metal.py',
+    'Common/Tools/ForgeShadingLanguage/includes/metal.h',
 ]
 
 def main():
@@ -26,7 +26,7 @@ def main():
     args = parser.parse_args()
     names = set()
     for directory in ['Graphics/Interfaces', 'OS/Interfaces', 'Application/Interfaces', 'Utilities/Interfaces']:
-        for path in (ROOT / 'Common_3' / directory).glob('*.h'):
+        for path in (ROOT / 'Common' / directory).glob('*.h'):
             names.update(re.findall(r'\bTF(?:_[A-Z]\w*|[A-Z]\w*)\b', path.read_text()))
     rename = {}
     for name in sorted(names):

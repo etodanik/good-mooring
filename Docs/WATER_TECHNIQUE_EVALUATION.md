@@ -10,7 +10,10 @@ This evaluation separates published methods, inspected code, observed images, an
 
 The code review covers generation, local wakes, foam transport, particles, optics, sky sampling, geometry, and the physics interface. The latest source revision includes persistent crest events and shared material coordinates for wake foam. Full visual acceptance remains separate from these implementation claims.
 
-The [first source capture](../build/mac/Debug/QA/crest-events-storm-low-v1/MooringSimulator_balanced-storm-00.png) removes the large airborne lace webs. Its [source diagnostic](../build/mac/Debug/QA/crest-events-storm-low-v1/MooringSimulator_balanced-storm-41.png) places events on active compression. The earlier [granular motion sheet](../build/mac/Debug/QA/granular-storm-low-motion/review.png) predates persistent sources and records the random-cluster problem. Neither archive establishes final parity.
+Previous source captures and review sheets were intentionally removed from the
+repository. Recreate current evidence with the `MooringQA` or `MooringQAUltra`
+target described in [WATER_QA.md](WATER_QA.md); a local capture is required for
+each visual acceptance decision.
 
 The supplied references show broad dark troughs, translucent faces, crest-localized froth, detached spray, and thinner trailing foam. Their lighting and camera angles differ. Those images support a visual target, not a reconstruction of each game's renderer. Motion quality also requires sequences; still images cannot establish it.
 
@@ -56,7 +59,7 @@ Ubisoft's June 2026 account names new water tessellation, volumetric foam, dynam
 
 ### Spectrum, geometry, and detail
 
-[Ocean.cpp](/Users/danny/src/mooring-simulator/Examples_3/Unit_Tests/src/40_MooringSimulator/Water/Ocean.cpp) separates wind sea and swell, with finite-depth dispersion. Three physical bands cover 256, 64, and 16 meters. A fourth band supplies normal detail. These choices remain useful.
+[Ocean.cpp](/Users/danny/src/mooring-simulator/Mooring/Water/Ocean.cpp) separates wind sea and swell, with finite-depth dispersion. Three physical bands cover 256, 64, and 16 meters. A fourth band supplies normal detail. These choices remain useful.
 
 Both GPU resolutions reconstruct the same 128² physical coefficients. Ultra's 512² transform improves reconstruction sampling; it does not add physical frequencies. Increasing that resolution multiplies storage and transform work without fixing foam sources or reflections.
 
@@ -64,7 +67,7 @@ The radial indexed grid concentrates vertices around the viewer and camera focus
 
 ### Reflections and scattering
 
-[Water.frag.fsl](../Examples_3/Unit_Tests/src/40_MooringSimulator/Shaders/Water.frag.fsl) collects mean slopes and a scalar second moment. Unresolved variance now broadens both the sun highlight and filtered sky reflection. Spherical-area weights preserve the sky's mean radiance. Object reflection still traces one direction, and directional slope covariance remains absent.
+[Water.frag.fsl](../Mooring/Shaders/Water.frag.fsl) collects mean slopes and a scalar second moment. Unresolved variance now broadens both the sun highlight and filtered sky reflection. Spherical-area weights preserve the sky's mean radiance. Object reflection still traces one direction, and directional slope covariance remains absent.
 
 This closes part of the geometry-to-normal-to-BRDF transition. It remains an isotropic approximation of the richer treatment in [Bruneton, Neyret, and Holzschuch](https://evasion.inrialpes.fr/Publications/2010/BNH10/article.pdf). Mean environment Fresnel uses the paper’s equation 26 with scalar slope variance. Magnified visible sky uses positive cubic reconstruction. A three-scale HDR bloom adds restrained glow around bright highlights, including calm-water sun glints.
 
@@ -76,11 +79,11 @@ The new fixed Whitecaps views separate environment reflection, water-body light,
 
 ### Breaking, foam, and particles
 
-[Foam shading](../Examples_3/Unit_Tests/src/40_MooringSimulator/Shaders/Water.frag.fsl) separates transported density from textured coverage. Age and flow control erosion. Subpixel texture coverage converges toward average density, which fixes the former distant white islands. Fine pores remain visible inside fresh sheets. Raw density checks still cannot certify beauty.
+[Foam shading](../Mooring/Shaders/Water.frag.fsl) separates transported density from textured coverage. Age and flow control erosion. Subpixel texture coverage converges toward average density, which fixes the former distant white islands. Fine pores remain visible inside fresh sheets. Raw density checks still cannot certify beauty.
 
 Half-precision moments transport foam age, air concentration, and air depth beside density. Instantaneous breaking stays separate. Local flow includes a bounded divergence correction. Spectral shading approximates surface concentration from filtered band stretch and slope. The product neglects cross-band shear. Rasterized triangle area caused camera-dependent facets and was removed. The two corrections are applied separately.
 
-[Crest emission](../Examples_3/Unit_Tests/src/40_MooringSimulator/Shaders/WaterEffects.comp.fsl) tracks 256 sources in fixed 4 m world cells. Each follows active compression for at most 2.5 seconds. Compression controls emission; orbital velocity controls launch. Each event receives one, four, or eight particle slots by quality. Balanced and Ultra reserve one for replenished crest froth. Calm and paused-resize checks distinguish these events from camera-dependent random emission.
+[Crest emission](../Mooring/Shaders/WaterEffects.comp.fsl) tracks 256 sources in fixed 4 m world cells. Each follows active compression for at most 2.5 seconds. Compression controls emission; orbital velocity controls launch. Each event receives one, four, or eight particle slots by quality. Balanced and Ultra reserve one for replenished crest froth. Calm and paused-resize checks distinguish these events from camera-dependent random emission.
 
 Compact raised crowns and wake rafts conform to the wave at each vertex. Wake rafts share the surface's material field and advection phases. They no longer rotate one texture stamp per particle. Older rafts settle quickly and develop pores. Stronger stern injection and fewer rafts shift visible wake foam into the transported field.
 
@@ -90,15 +93,15 @@ Raised froth now also loses relief and opacity when its tracked breaking source 
 
 Filtered procedural droplets replace the former stretched lace cards. Airborne parcels share one ballistic state, while mist has wind drag and a short lifetime. Directional scattering and shared shadows now affect airborne brightness. This is a bounded source model, not a resolved overturning surface or continuous breaking-front solver. The 4,096-slot pool remains fixed.
 
-[Bubble scattering](../Examples_3/Unit_Tests/src/40_MooringSimulator/Shaders/Water.frag.fsl) uses transported concentration and variable depth. Injection, rise, and dissolution replace the fixed 45 cm layer. The representation is one depth column per surface sample. It does not simulate independent three-dimensional bubbles or liquid sheets.
+[Bubble scattering](../Mooring/Shaders/Water.frag.fsl) uses transported concentration and variable depth. Injection, rise, and dissolution replace the fixed 45 cm layer. The representation is one depth column per surface sample. It does not simulate independent three-dimensional bubbles or liquid sheets.
 
 ### Hulls, docks, and physics
 
 The attached pressure profile creates bow pile-up, shoulder drawdown, and stern recovery. Nine outgoing packet directions approximate a continuous wake. The shared CPU/GPU gradients and resistance-energy budget are useful foundations. Their calibration remains empirical.
 
-[Dock reflection](/Users/danny/src/mooring-simulator/Examples_3/Unit_Tests/src/40_MooringSimulator/Water/Ocean.cpp:369) tests packet crossings against two fixed dock faces. Background-spectrum injection is absent. The dock therefore cannot produce a complete wave shadow or diffraction field. Extra contact foam cannot compensate for that missing interaction.
+[Dock reflection](/Users/danny/src/mooring-simulator/Mooring/Water/Ocean.cpp:369) tests packet crossings against two fixed dock faces. Background-spectrum injection is absent. The dock therefore cannot produce a complete wave shadow or diffraction field. Extra contact foam cannot compensate for that missing interaction.
 
-Two scaling limits need correction before the integrated marina. [Wake energy and time](/Users/danny/src/mooring-simulator/Examples_3/Unit_Tests/src/40_MooringSimulator/Simulation/Simulation.cpp:67) reside in `World` but update inside the vessel loop. Multiple vessels would share their emission budget and clock. [Effect preparation](/Users/danny/src/mooring-simulator/Examples_3/Unit_Tests/src/40_MooringSimulator/Water/OceanRenderer.cpp:262) accepts one vessel snapshot and layout. Existing capacity constants do not establish sixteen-vessel visual support.
+Two scaling limits need correction before the integrated marina. [Wake energy and time](/Users/danny/src/mooring-simulator/Mooring/Simulation/Simulation.cpp:67) reside in `World` but update inside the vessel loop. Multiple vessels would share their emission budget and clock. [Effect preparation](/Users/danny/src/mooring-simulator/Mooring/Water/OceanRenderer.cpp:262) accepts one vessel snapshot and layout. Existing capacity constants do not establish sixteen-vessel visual support.
 
 Jolt remains responsible for vessel motion. Changes to visual quality must preserve the physical spectrum, collision behavior, and scoring. New interactive waves need a consistent force-query path. A GPU-only obstacle field with no physics representation cannot satisfy that requirement.
 

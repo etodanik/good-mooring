@@ -1,5 +1,5 @@
 #pragma once
-#include "../../Common_3/Application/Config.h"
+#include "../../Common/Application/Config.h"
 #include "Tracy.h"
 
 // The PoC has no script VM, asset conversion, animation, or shader reload server.

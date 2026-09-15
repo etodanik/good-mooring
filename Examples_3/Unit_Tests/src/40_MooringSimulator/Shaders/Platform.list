@@ -1,4 +1,0 @@
-#include "../../../../../Common_3/Graphics/FSL/defaults.h"
-#comp platform_probe.comp
-#include "Platform.comp.fsl"
-#end

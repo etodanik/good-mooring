@@ -1,3 +1,0 @@
-#ispc x86:avx FillImage
-#include "FillImage.comp.fsl"
-#end
