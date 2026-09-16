@@ -16,6 +16,8 @@ OceanRenderer* createOceanRenderer(TFRenderer*, unsigned resolution = 256);
 void           destroyOceanRenderer(OceanRenderer*);
 void           loadOceanRenderer(OceanRenderer*, uint32_t format);
 void           unloadOceanRenderer(OceanRenderer*);
+bool           reloadOceanShaders(OceanRenderer*, uint32_t format);
+void           bindOceanShaderLabResources(OceanRenderer*, TFCmd*, unsigned frame);
 void           computeOcean(OceanRenderer*, TFCmd*, const Ocean*, unsigned frame, float time, const WaterLook& look = WaterLook{});
 void prepareOceanEffects(OceanRenderer*, TFCmd*, const Camera&, unsigned frame, float level, const f4x4& shadowMatrix, const WaterLook&,
                          const Snapshot&, const VesselLayout&, float4 reflectionBounds = { 0, 0, 1, 1 },

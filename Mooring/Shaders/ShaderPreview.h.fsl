@@ -1,0 +1,84 @@
+#ifndef MOORING_SHADER_PREVIEW
+#define MOORING_SHADER_PREVIEW
+#include "ShaderLab.srt.h"
+
+// Registration is consumed by shader_previews.py before FSL compilation.
+#define SHADER_PREVIEW_1D(function, label, sampling)
+#define SHADER_PREVIEW_2D(function, label, sampling)
+#define SHADER_PREVIEW_3D_SLICE(function, label, sampling)
+
+STRUCT(ShaderPreview1D)
+{
+    DATA(float, coordinate, None);
+    DATA(float, time, None);
+    DATA(float4, parameters, None);
+};
+
+STRUCT(ShaderPreview2D)
+{
+    DATA(float2, coordinate, None);
+    DATA(float, time, None);
+    DATA(float4, parameters, None);
+};
+
+STRUCT(ShaderPreview3D)
+{
+    DATA(float3, coordinate, None);
+    DATA(float, time, None);
+    DATA(float4, parameters, None);
+};
+
+STRUCT(ShaderLabFragment)
+{
+    DATA(float4, position, SV_Position);
+    DATA(float2, uv, TEXCOORD0);
+};
+
+float4 previewScalar(float value)
+{
+    return float4(value, value, value, 1);
+}
+
+float3 shaderPreviewCoordinate(float2 uv)
+{
+    float3 coordinate = gShaderLab.origin.xyz + float3(uv, 0) * gShaderLab.extent.xyz;
+    if (gShaderLab.extent.w == 3)
+    {
+        coordinate.z = gShaderLab.settings.z;
+        if (gShaderLab.settings.y == 1)
+            coordinate = float3(coordinate.x, gShaderLab.settings.z, gShaderLab.origin.z + uv.y * gShaderLab.extent.z);
+        if (gShaderLab.settings.y == 2)
+            coordinate = float3(gShaderLab.settings.z, gShaderLab.origin.y + uv.x * gShaderLab.extent.y,
+                                gShaderLab.origin.z + uv.y * gShaderLab.extent.z);
+    }
+    if (gShaderLab.settings.x != 0)
+        coordinate = floor(coordinate);
+    return coordinate;
+}
+
+float3 shaderPreviewDisplay(float4 value)
+{
+    float3 color = value.rgb;
+    if (gShaderLab.display.z >= 0)
+    {
+        float component = value[uint(gShaderLab.display.z)];
+        color = float3(component, component, component);
+    }
+    if (any(color != color) || any(abs(color) > 1e30))
+        return float3(1, 0, 1);
+    if (gShaderLab.display.w != 0)
+    {
+        float amount =
+            clamp(color.x / max(.000001, max(abs(gShaderLab.display.x), abs(gShaderLab.display.y))), -1.0, 1.0);
+        return lerp(float3(.12, .12, .12), amount < 0 ? float3(.1, .35, 1) : float3(1, .25, .1), abs(amount));
+    }
+    return saturate((color - gShaderLab.display.x) / max(.000001, gShaderLab.display.y - gShaderLab.display.x));
+}
+
+void shaderPreviewStore(float2 position, float4 value)
+{
+    uint2 pixel = uint2(position);
+    if (pixel.x < gShaderLab.outputSize.x && pixel.y < gShaderLab.outputSize.y)
+        gPreviewSamples[pixel.y * gShaderLab.outputSize.x + pixel.x] = value;
+}
+#endif

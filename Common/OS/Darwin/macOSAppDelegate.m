@@ -23,6 +23,7 @@
  */
 
 #import "macOSAppDelegate.h"
+#include "macOSFramePacing.h"
 
 #import <IOKit/pwr_mgt/IOPMLib.h>
 #define DISPATCH_APPROACH
@@ -41,7 +42,7 @@ static IOPMAssertionID systemSleepAssertionID, displaySleepAssertionID;
 @end
 
 @interface AppDelegate ()
-
+- (void)setFrameRateLimit:(uint32_t)framesPerSecond;
 @end
 
 @implementation AppDelegate
@@ -56,6 +57,14 @@ static IOPMAssertionID systemSleepAssertionID, displaySleepAssertionID;
     {
         [myController draw];
     }
+}
+
+- (void)setFrameRateLimit:(uint32_t)framesPerSecond
+{
+    if (!renderTimer)
+        return;
+    const uint64_t interval = framesPerSecond ? NSEC_PER_SEC / framesPerSecond : 1;
+    dispatch_source_set_timer(renderTimer, dispatch_time(DISPATCH_TIME_NOW, 0), interval, framesPerSecond ? NSEC_PER_MSEC : 0);
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification*)aNotification
@@ -73,8 +82,7 @@ static IOPMAssertionID systemSleepAssertionID, displaySleepAssertionID;
     renderTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
     // Benchmarks remove the playback cap; the main queue still services UI events.
     BOOL benchmark = [[[NSProcessInfo processInfo] arguments] containsObject:@"--benchmark-unthrottled"];
-    dispatch_source_set_timer(renderTimer, dispatch_time(DISPATCH_TIME_NOW, 0), benchmark ? NSEC_PER_MSEC : NSEC_PER_SEC / 30,
-                              benchmark ? 0 : NSEC_PER_MSEC);
+    [self setFrameRateLimit:benchmark ? 0 : 30];
     dispatch_source_set_event_handler(renderTimer, ^{
         [weakSelf drawFunc];
     });
@@ -128,3 +136,8 @@ static IOPMAssertionID systemSleepAssertionID, displaySleepAssertionID;
 }
 
 @end
+
+void setMacOSFrameRateLimit(uint32_t framesPerSecond)
+{
+    [(AppDelegate*)NSApp.delegate setFrameRateLimit:framesPerSecond];
+}

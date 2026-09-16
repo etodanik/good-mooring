@@ -1,77 +1,109 @@
 #include "Ocean.srt.h"
 #include "Whitewater.h.fsl"
-float3 displacementGradient(uint band,uint2 pixel)
+
+float3 displacementGradient(uint band, uint2 pixel)
 {
-    uint n=gOcean.transform.x, mask=n-1, base=band*n*n;
-    pixel&=mask;
-    float4 l=gSource[base+pixel.y*n+((pixel.x-1)&mask)], r=gSource[base+pixel.y*n+((pixel.x+1)&mask)];
-    float4 b=gSource[base+((pixel.y-1)&mask)*n+pixel.x], t=gSource[base+((pixel.y+1)&mask)*n+pixel.x];
-    float scale=gOcean.clockDepth.w*float(n)/(2*gOcean.lengths[band]);
-    return float3(r.z-l.z,t.w-b.w,((t.z-b.z)+(r.w-l.w))*.5)*scale;
+    uint resolution = gOcean.transform.x;
+    uint mask = resolution - 1;
+    uint base = band * resolution * resolution;
+    pixel &= mask;
+    float4 leftSample = gSource[base + pixel.y * resolution + ((pixel.x - 1) & mask)];
+    float4 rightSample = gSource[base + pixel.y * resolution + ((pixel.x + 1) & mask)];
+    float4 backSample = gSource[base + ((pixel.y - 1) & mask) * resolution + pixel.x];
+    float4 frontSample = gSource[base + ((pixel.y + 1) & mask) * resolution + pixel.x];
+    float scale = gOcean.clockDepth.w * float(resolution) / (2 * gOcean.lengths[band]);
+    return float3(rightSample.z - leftSample.z, frontSample.w - backSample.w,
+                  ((frontSample.z - backSample.z) + (rightSample.w - leftSample.w)) * .5) *
+           scale;
 }
-NUM_THREADS(8,8,1)
+NUM_THREADS(8, 8, 1)
+
 void CS_MAIN(SV_DispatchThreadID(uint3) id)
 {
     INIT_MAIN;
-    uint n=gOcean.transform.x, mask=n-1, base=id.z*n*n, i=base+id.y*n+id.x;
-    float4 c=gSource[i];
-    float4 l=gSource[base+id.y*n+((id.x-1)&mask)], r=gSource[base+id.y*n+((id.x+1)&mask)];
-    float4 b=gSource[base+((id.y-1)&mask)*n+id.x], t=gSource[base+((id.y+1)&mask)*n+id.x];
-    float spacing=gOcean.lengths[id.z]/float(n), chop=id.z==3?0.0:gOcean.clockDepth.w;
-    float4 ddx=(r-l)/(2*spacing), ddz=(t-b)/(2*spacing);
-    float jxx=1+chop*ddx.z, jzz=1+chop*ddz.w, jxz=chop*ddz.z, jzx=chop*ddx.w;
-    float jacobian=jxx*jzz-jxz*jzx;
-    float2 slope=float2(ddx.x*jzz-ddz.x*jzx,ddz.x*jxx-ddx.x*jxz)/max(.25,jacobian);
-    float foam=0; float4 whitewater=float4(0,0,0,0);
-    bool breakingBand=id.z==0 || id.z==2;
-    uint whitewaterBase=(id.z/2)*n*n;
-    if(breakingBand && gOcean.current.w>0)
+    uint resolution = gOcean.transform.x;
+    uint mask = resolution - 1;
+    uint base = id.z * resolution * resolution;
+    uint sampleIndex = base + id.y * resolution + id.x;
+    float4 centerSample = gSource[sampleIndex];
+    float4 leftSample = gSource[base + id.y * resolution + ((id.x - 1) & mask)];
+    float4 rightSample = gSource[base + id.y * resolution + ((id.x + 1) & mask)];
+    float4 backSample = gSource[base + ((id.y - 1) & mask) * resolution + id.x];
+    float4 frontSample = gSource[base + ((id.y + 1) & mask) * resolution + id.x];
+    float spacing = gOcean.lengths[id.z] / float(resolution);
+    float chop = id.z == 3 ? 0.0 : gOcean.clockDepth.w;
+    float4 derivativeX = (rightSample - leftSample) / (2 * spacing);
+    float4 derivativeZ = (frontSample - backSample) / (2 * spacing);
+    float jacobianXX = 1 + chop * derivativeX.z;
+    float jacobianZZ = 1 + chop * derivativeZ.w;
+    float jacobianXZ = chop * derivativeZ.z;
+    float jacobianZX = chop * derivativeX.w;
+    float jacobian = jacobianXX * jacobianZZ - jacobianXZ * jacobianZX;
+    float2 slope = float2(derivativeX.x * jacobianZZ - derivativeZ.x * jacobianZX,
+                          derivativeZ.x * jacobianXX - derivativeX.x * jacobianXZ) /
+                   max(.25, jacobian);
+    float foam = 0;
+    float4 whitewater = float4(0, 0, 0, 0);
+    bool breakingBand = id.z == 0 || id.z == 2;
+    uint whitewaterBase = (id.z / 2) * resolution * resolution;
+    if (breakingBand && gOcean.current.w > 0)
     {
         // History lives in the undisplaced wave coordinates. Mesh motion
         // already supplies orbital transport; adding it here moves foam twice.
-        float2 uv=float2(id.xy)-gOcean.current.xz*gOcean.clockDepth.y/spacing;
-        int2 cell=int2(floor(uv)); float2 blend=frac(uv);
-        for(uint y=0;y<2;y++) for(uint x=0;x<2;x++)
-        {
-            uint2 p=uint2(cell+int2(x,y))&mask;
-            float weight=(x!=0?blend.x:1-blend.x)*(y!=0?blend.y:1-blend.y);
-            float center=gHistory[base+p.y*n+p.x].w;
-            float neighbours=gHistory[base+p.y*n+((p.x-1)&mask)].w+gHistory[base+p.y*n+((p.x+1)&mask)].w;
-            neighbours+=gHistory[base+((p.y-1)&mask)*n+p.x].w+gHistory[base+((p.y+1)&mask)*n+p.x].w;
-            float diffusion=min(.24,gOcean.foamSettings.y*gOcean.clockDepth.y/(spacing*spacing));
-            foam+=(center+(neighbours-4*center)*diffusion)*weight;
-            float4 state=float4(gWhitewaterHistory[whitewaterBase+p.y*n+p.x]);
-            float4 adjacent=float4(gWhitewaterHistory[whitewaterBase+p.y*n+((p.x-1)&mask)])+float4(gWhitewaterHistory[whitewaterBase+p.y*n+((p.x+1)&mask)]);
-            adjacent+=float4(gWhitewaterHistory[whitewaterBase+((p.y-1)&mask)*n+p.x])+float4(gWhitewaterHistory[whitewaterBase+((p.y+1)&mask)*n+p.x]);
-            whitewater+=(state+(adjacent-4*state)*diffusion)*weight;
-        }
+        float2 uv = float2(id.xy) - gOcean.current.xz * gOcean.clockDepth.y / spacing;
+        int2 cell = int2(floor(uv));
+        float2 blend = frac(uv);
+        for (uint offsetY = 0; offsetY < 2; offsetY++)
+            for (uint offsetX = 0; offsetX < 2; offsetX++)
+            {
+                uint2 texel = uint2(cell + int2(offsetX, offsetY)) & mask;
+                float weight = (offsetX != 0 ? blend.x : 1 - blend.x) * (offsetY != 0 ? blend.y : 1 - blend.y);
+                float center = gHistory[base + texel.y * resolution + texel.x].w;
+                float neighbours = gHistory[base + texel.y * resolution + ((texel.x - 1) & mask)].w +
+                                   gHistory[base + texel.y * resolution + ((texel.x + 1) & mask)].w;
+                neighbours += gHistory[base + ((texel.y - 1) & mask) * resolution + texel.x].w +
+                              gHistory[base + ((texel.y + 1) & mask) * resolution + texel.x].w;
+                float diffusion = min(.24, gOcean.foamSettings.y * gOcean.clockDepth.y / (spacing * spacing));
+                foam += (center + (neighbours - 4 * center) * diffusion) * weight;
+                float4 state = float4(gWhitewaterHistory[whitewaterBase + texel.y * resolution + texel.x]);
+                float4 adjacent =
+                    float4(gWhitewaterHistory[whitewaterBase + texel.y * resolution + ((texel.x - 1) & mask)]) +
+                    float4(gWhitewaterHistory[whitewaterBase + texel.y * resolution + ((texel.x + 1) & mask)]);
+                adjacent += float4(gWhitewaterHistory[whitewaterBase + ((texel.y - 1) & mask) * resolution + texel.x]) +
+                            float4(gWhitewaterHistory[whitewaterBase + ((texel.y + 1) & mask) * resolution + texel.x]);
+                whitewater += (state + (adjacent - 4 * state) * diffusion) * weight;
+            }
     }
-    float3 gradient=float3(jxx-1,jzz-1,(jxz+jzx)*.5);
-    if(id.z==0)
+    float3 gradient = float3(jacobianXX - 1, jacobianZZ - 1, (jacobianXZ + jacobianZX) * .5);
+    if (id.z == 0)
     {
         // The two gravity-wave bands share a 256 m period. Test their combined
         // deformation there: separate determinants miss coincident crests.
         // Short crests retain their fine field, avoiding coarse-grid aliasing.
-        gradient+=displacementGradient(1,id.xy*4);
+        gradient += displacementGradient(1, id.xy * 4);
     }
-    float stretch=1+(gradient.x+gradient.y-length(float2(gradient.x-gradient.y,2*gradient.z)))*.5;
-    float threshold=gOcean.breaking[id.z];
+    float stretch = 1 + (gradient.x + gradient.y - length(float2(gradient.x - gradient.y, 2 * gradient.z))) * .5;
+    float threshold = gOcean.breaking[id.z];
     // A finite instability interval keeps neighbouring crest samples in one
     // breaking event instead of switching isolated texels fully on and off.
-    float onset=min(id.z==0?.055:.025,max(.001,(1-threshold)*.15));
-    float source=(id.z==0 || id.z==2)?1-smoothstep(threshold-onset,threshold+onset,stretch):0;
-    float crestHeight=c.x;
-    if(id.z==0) crestHeight+=gSource[n*n+((id.y*4)&mask)*n+((id.x*4)&mask)].x;
-    source*=smoothstep(-.04,.12,crestHeight);
+    float onset = min(id.z == 0 ? .055 : .025, max(.001, (1 - threshold) * .15));
+    float source = (id.z == 0 || id.z == 2) ? 1 - smoothstep(threshold - onset, threshold + onset, stretch) : 0;
+    float crestHeight = centerSample.x;
+    if (id.z == 0)
+        crestHeight += gSource[resolution * resolution + ((id.y * 4) & mask) * resolution + ((id.x * 4) & mask)].x;
+    source *= smoothstep(-.04, .12, crestHeight);
     // Recharge only the rare sharp crests selected by the calibrated CDF.
     // Existing foam retains a continuous lifetime as those crests move on.
     // A spilling lip aerates quickly, then clears as the crest advances.
     // Slow injection and long persistence left sparse caps and fat remnants.
-    float decay=gOcean.foamSettings.x*(id.z==2?1.8:1.0)*(1+4*(1-source));
-    float plunge=gOcean.current.w>0 && gOcean.clockDepth.y>0?abs(c.x-gHistory[i].y)/max(.001,gOcean.clockDepth.y):0;
-    whitewater=evolveWhitewater(foam,whitewater,source,plunge,gOcean.clockDepth.y,decay,18,foam);
-    gDestination[i]=float4(c.z*chop,c.x,c.w*chop,foam);
-    gNormals[i]=float4(slope,dot(slope,slope),jacobian);
-    if(breakingBand) gWhitewaterOutput[whitewaterBase+id.y*n+id.x]=min16float4(whitewater);
+    float decay = gOcean.foamSettings.x * (id.z == 2 ? 1.8 : 1.0) * (1 + 4 * (1 - source));
+    float plunge = gOcean.current.w > 0 && gOcean.clockDepth.y > 0
+                       ? abs(centerSample.x - gHistory[sampleIndex].y) / max(.001, gOcean.clockDepth.y)
+                       : 0;
+    whitewater = evolveWhitewater(foam, whitewater, source, plunge, gOcean.clockDepth.y, decay, 18, foam);
+    gDestination[sampleIndex] = float4(centerSample.z * chop, centerSample.x, centerSample.w * chop, foam);
+    gNormals[sampleIndex] = float4(slope, dot(slope, slope), jacobian);
+    if (breakingBand)
+        gWhitewaterOutput[whitewaterBase + id.y * resolution + id.x] = min16float4(whitewater);
     RETURN();
 }

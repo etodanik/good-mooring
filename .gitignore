@@ -51,6 +51,7 @@ __pycache__/
 .ruff_cache/
 
 # Scratch data and local tool state
+/Common/Tools/ReloadServer/server-log.txt
 /tmp/
 /.cache/
 /.openai/

@@ -2,6 +2,7 @@
 #include "Interaction.h"
 #include "Water/OceanRenderer.h"
 #include "Water/WaterProfile.h"
+#include "Water/ShaderLab.h"
 #include "Tools/Mooring/TracyMetal.h"
 #include "Water/PhysicsConfig.h"
 #include "Common/Application/Interfaces/IApp.h"
@@ -19,6 +20,7 @@
 #include "Common/Utilities/RingBuffer.h"
 #include "Common/Utilities/Interfaces/ILog.h"
 #include "Common/OS/Interfaces/IInput.h"
+#include "Common/OS/Darwin/macOSFramePacing.h"
 #include "Common/Utilities/Interfaces/IFileSystem.h"
 #include "Common/Utilities/Interfaces/IMemory.h"
 
@@ -37,7 +39,7 @@ static bool validateResources()
         { TF_RD_GPU_CONFIG, "gpu.cfg" },
         { TF_RD_OTHER_FILES, "gpu.data" },
         { TF_RD_OTHER_FILES, "physics.ini" },
-        { TF_RD_FONTS, "AtkinsonHyperlegible-Regular.msdf" },
+        { TF_RD_FONTS, "Inter-Regular.msdf" },
         { TF_RD_SHADER_BINARIES, "MACOS/nuklear.vert.metal" },
         { TF_RD_SHADER_BINARIES, "MACOS/nuklear_SAMPLE_COUNT_1.frag.metal" },
         { TF_RD_SHADER_BINARIES, "MACOS/nuklear_SAMPLE_COUNT_2.frag.metal" },
@@ -108,6 +110,7 @@ class MooringSimulator final: public IApp
     int  qaScenario = -1, qaEnd = 11, qaFrame = 0, qaView = 0, qaInspect = 0, qaBenchmarkFrames = 0, qaMotionFrames = 360;
     bool qaUltra = false, qaReload = false, qaMotion = false, qaStill = false, qaLow = false, qaResize = false, qaWaterline = false;
     bool qaProfile = false;
+    bool qaShaderLab = false, openShaderLab = false;
     mooring::WaterProfile waterProfile{};
     uint64_t              updateWork = 0, waitWork = 0, drawWork = 0;
     unsigned              resizeWidth = 0, resizeHeight = 0;
@@ -378,6 +381,10 @@ public:
         int requestedScene = -1;
         for (int i = 1; i < argc; i++)
         {
+            if (strcmp(argv[i], "--shader-lab") == 0)
+                openShaderLab = true;
+            if (strcmp(argv[i], "--shader-lab-qa") == 0)
+                qaShaderLab = openShaderLab = true;
             if (strcmp(argv[i], "--water-qa") == 0)
                 qaScenario = 0;
             if (strcmp(argv[i], "--water-qa-ultra") == 0)
@@ -470,8 +477,8 @@ public:
         fonts.pFrameIdx = &mSettings.mFrameIdx;
         initFontSystem(&fonts);
         TFFontDesc font = {};
-        font.pFontPath = "AtkinsonHyperlegible-Regular.msdf";
-        font.pFontName = "Atkinson Hyperlegible";
+        font.pFontPath = "Inter-Regular.msdf";
+        font.pFontName = "Inter";
         font.mScaleMultiplier = 1.0f;
         font.mFlags = TF_FONT_ASCII | TF_FONT_ATLAS_AUTO_RESOLUTION_ON_INIT;
         gFont = addFont(&font);
@@ -480,7 +487,7 @@ public:
         TFUserInterfaceDesc ui = {};
         ui.pRenderer = gRenderer;
         ui.pFont = gFont;
-        ui.mFontHeight = 18.0f;
+        ui.mFontHeight = 14.0f;
         ui.pFrameIdx = &mSettings.mFrameIdx;
         ui.mFrameMaxCount = 2;
         initUserInterface(&ui);
@@ -506,6 +513,7 @@ public:
         }
         mooring::setEnvironment(gGame.world, environment);
         gGame.difficulty = mooring::Difficulty::Advanced;
+        gGame.uncappedFPS = !mSettings.mVSyncEnabled;
         if (qaScenario >= 0)
         {
             gGame.seaLab.look.preset(qaUltra ? 2 : 1);
@@ -517,6 +525,12 @@ public:
         if (!mooring::verifyOceanGPU(gWater, gQueue))
             return false;
         gScene = mooring::createScene(gRenderer);
+        mooring::initShaderLab(gRenderer, gQueue);
+        if (openShaderLab)
+        {
+            mooring::setShaderLabOpen(true);
+            gGame.seaLab.paused = qaShaderLab;
+        }
         fsCreateDirectory(TF_RD_SCREENSHOTS, "", true);
         initScreenshotCapturer(gRenderer, gQueue, GetName());
         extern bool gCaptureCursorOnMouseDown;
@@ -527,6 +541,7 @@ public:
     {
         MTRACY_ZONE("Exit");
         mooringTracyScene(nullptr);
+        mooring::exitShaderLab();
         exitScreenshotCapturer();
         mooring::destroyScene(gScene);
         mooring::destroyOceanRenderer(gWater);
@@ -543,9 +558,19 @@ public:
         exitRenderer(gRenderer);
         exitGPUConfig();
     }
-    bool Load(TFReloadDesc*) override
+    bool Load(TFReloadDesc* reload) override
     {
         MTRACY_ZONE("Load");
+        if (reload->mType == TF_RELOAD_TYPE_SHADER)
+        {
+            bool scene = mooring::reloadSceneShaders(gScene, gSwapchain->ppRenderTargets[0]->mFormat);
+            bool water = mooring::reloadOceanShaders(gWater, TinyImageFormat_R16G16B16A16_SFLOAT);
+            bool previews = mooring::reloadShaderLab();
+            LOGF(scene && water && previews ? eINFO : eERROR,
+                 "Shader reload: scene %s, water %s, previews %s; simulation and resource history preserved",
+                 scene ? "updated" : "retained", water ? "updated" : "retained", previews ? "updated" : "retained");
+            return true;
+        }
         TFSwapChainDesc swap = {};
         swap.mWindowHandle = pWindow->handle;
         swap.mPresentQueueCount = 1;
@@ -594,10 +619,12 @@ public:
 #endif
         return true;
     }
-    void Unload(TFReloadDesc*) override
+    void Unload(TFReloadDesc* reload) override
     {
         MTRACY_ZONE("Unload");
         waitQueueIdle(gQueue);
+        if (reload->mType == TF_RELOAD_TYPE_SHADER)
+            return;
         mooring::unloadOceanRenderer(gWater);
         mooring::unloadScene(gScene);
         unloadProfilerUI();
@@ -608,16 +635,27 @@ public:
     void Update(float dt) override
     {
         MTRACY_ZONE("Update");
+        const uint64_t started = getUSec(true);
+        mooring::updateShaderLab(dt);
         MTRACY_PLOT("Frame / dt (ms)", dt * 1000);
         MTRACY_PLOT("View / width", mSettings.mWidth);
         MTRACY_PLOT("View / height", mSettings.mHeight);
         MTRACY_PLOT("View / diagnostic", gGame.seaLab.look.debugView);
-        const uint64_t started = qaProfile ? getUSec(true) : 0;
         // Capture fixtures and normal interaction share the drawable size.
         // Updating this only at fixture creation left refraction, reflection,
         // ray reconstruction and particles using the previous aspect ratio.
         gGame.camera.width = mSettings.mWidth;
         gGame.camera.height = mSettings.mHeight;
+        gGame.fullscreen = pWindow->fullScreen;
+        if (qaShaderLab)
+        {
+            int result = mooring::runShaderLabQA();
+            if (result != 0)
+            {
+                LOGF(result > 0 ? eINFO : eERROR, "Shader Lab QA %s", result > 0 ? "PASSED" : "FAILED");
+                requestShutdown();
+            }
+        }
         if (qaScenario >= 0)
             updateWaterQA();
         else
@@ -635,8 +673,10 @@ public:
             TFReloadDesc reload = { TF_RELOAD_TYPE_RENDERTARGET };
             requestReload(&reload);
         }
+        const uint64_t updateElapsed = getUSec(true) - started;
+        mooring::FrameTimings::sample(gGame.timings.update, updateElapsed * .001f);
         if (qaProfile)
-            updateWork += getUSec(true) - started;
+            updateWork += updateElapsed;
         if (mSettings.mFrames && mSettings.mFrames % 300 == 0)
         {
 #ifdef ENABLE_MEMORY_TRACKING
@@ -667,17 +707,24 @@ public:
     void Draw() override
     {
         MTRACY_ZONE("Draw");
-        uint64_t started = qaProfile ? getUSec(true) : 0;
+        if (mSettings.mVSyncEnabled == gGame.uncappedFPS)
+        {
+            waitQueueIdle(gQueue);
+            toggleVSync(gRenderer, &gSwapchain);
+            mSettings.mVSyncEnabled = !gGame.uncappedFPS;
+            setMacOSFrameRateLimit(gGame.uncappedFPS ? 0 : 30);
+        }
+        uint64_t started = getUSec(true);
         uint32_t image = 0;
         acquireNextImage(gRenderer, gSwapchain, gAcquired[mSettings.mFrameIdx], nullptr, &image);
         GpuCmdRingElement frame = getNextGpuCmdRingElement(&gCommands, true, 1);
         waitForFences(gRenderer, 1, &frame.pFence);
+        mooring::completeShaderLabFrame(mSettings.mFrameIdx);
+        const uint64_t ready = getUSec(true);
+        mooring::FrameTimings::sample(gGame.timings.wait, (ready - started) * .001f);
         if (qaProfile)
-        {
-            const uint64_t ready = getUSec(true);
             waitWork += ready - started;
-            started = ready;
-        }
+        started = ready;
         resetCmdPool(gRenderer, frame.pCmdPool);
         TFCmd*          cmd = frame.pCmds[0];
         TFRenderTarget* target = gSwapchain->ppRenderTargets[image];
@@ -696,6 +743,7 @@ public:
                            mooring::seaState(mooring::worldOcean(gGame.world)).depth, gGame.seaLab.look, profile);
         // The restored Metal backend supports one active stage-boundary query.
         // Keep a whole-frame query instead of nesting UI queries inside it.
+        mooring::renderShaderLab(cmd, mSettings.mFrameIdx, gWater);
         uiCmdDrawUserInterface(cmd, gSwapchain, target, PROFILE_INVALID_TOKEN);
         cmdBindRenderTargets(cmd, nullptr);
         barrier.mCurrentState = TF_RESOURCE_STATE_RENDER_TARGET;
@@ -736,12 +784,21 @@ public:
         queuePresent(gQueue, &present);
         flipProfiler();
         mooringTracyFrame();
+        const uint64_t renderElapsed = getUSec(true) - started;
+        mooring::FrameTimings::sample(gGame.timings.render, renderElapsed * .001f);
+        mooring::FrameTimings::sample(gGame.timings.gpu, qaProfile ? -1 : getGpuProfileAvgTime(gGpuProfile));
         if (qaProfile)
-            drawWork += getUSec(true) - started;
+            drawWork += renderElapsed;
         if (resizeWidth)
         {
             setWindowClientSize(pWindow, resizeWidth, resizeHeight);
             resizeWidth = resizeHeight = 0;
+        }
+        if (gGame.fullscreenRequested)
+        {
+            gGame.fullscreenRequested = false;
+            // Change the native window after presenting; resize reloads run next frame.
+            toggleFullscreen(pWindow);
         }
     }
     const char* GetName() override { return "MooringSimulator"; }

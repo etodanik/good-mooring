@@ -12,6 +12,9 @@ contains the game and only the Forge runtime pieces required to run it.
 - `Docs/` — focused design and verification notes.
 - `MOORING.md` — the detailed project guide.
 
+[Tool windows](Docs/TOOL_WINDOWS.md) covers the command bar, clean view, and frame counters.
+[Shader Lab](Docs/SHADER_LAB.md) covers shader reload, function previews, and GPU resource inspection in the Debug app.
+
 The old Forge example tree and sample/unit-test applications are not part of
 the project. Visibility Buffer examples are not used by Mooring and have also
 been removed.

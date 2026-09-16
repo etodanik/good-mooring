@@ -1,3 +1,4 @@
+#include "ShaderLab.h"
 #include "OceanRenderer.h"
 #include "WaterProfile.h"
 #include "../Simulation/Hydrodynamics.h"
@@ -177,8 +178,50 @@ static void bindOceanResources(OceanRenderer* r, TFRenderTarget* opaque = nullpt
             data[26].mIndex = SRT_RES_IDX(WaterDraw, PerFrame, gWaterLight);
             data[26].ppTextures = &waterLight->pTexture;
         }
-        updateDescriptorSet(r->renderer, f, r->drawSets, opaque ? 27 : 23, data);
+        shaderLabUpdateDescriptorSet(r->renderer, f, r->drawSets, opaque ? 27 : 23, data);
     }
+}
+static void loadOceanComputeShaders(OceanRenderer* r)
+{
+    TFRenderer* renderer = r->renderer;
+    const char* names[] = { "ocean_spectrum.comp", "ocean_fft.comp", "ocean_surface.comp", "ocean_packets.comp", "ocean_mip.comp" };
+    for (unsigned i = 0; i < 5; ++i)
+    {
+        TFShaderLoadDesc shader = {};
+        shader.mComp.pFileName = names[i];
+        shaderLabAddShader(renderer, &shader, &r->computeShaders[i]);
+        TFPipelineDesc pipeline = {};
+        pipeline.mType = TF_PIPELINE_TYPE_COMPUTE;
+        pipeline.pName = names[i];
+        pipeline.mComputeDesc.pShaderProgram = r->computeShaders[i];
+        PIPELINE_LAYOUT_DESC(pipeline, nullptr, SRT_LAYOUT_DESC(OceanCompute, PerFrame), nullptr, nullptr);
+        shaderLabAddPipeline(renderer, &pipeline, &r->computePipelines[i]);
+    }
+    TFShaderLoadDesc effects = {};
+    effects.mComp.pFileName = "water_effects.comp";
+    shaderLabAddShader(renderer, &effects, &r->effectsShader);
+    TFPipelineDesc effectPipeline = {};
+    effectPipeline.mType = TF_PIPELINE_TYPE_COMPUTE;
+    effectPipeline.mComputeDesc.pShaderProgram = r->effectsShader;
+    PIPELINE_LAYOUT_DESC(effectPipeline, nullptr, SRT_LAYOUT_DESC(WaterDraw, PerFrame), nullptr, nullptr);
+    effectPipeline.pName = "Whitewater transport and particles";
+    shaderLabAddPipeline(renderer, &effectPipeline, &r->effectsPipeline);
+    effects.mComp.pFileName = "water_sky.comp";
+    shaderLabAddShader(renderer, &effects, &r->skyShader);
+    effectPipeline.mComputeDesc.pShaderProgram = r->skyShader;
+    effectPipeline.pName = "Sky radiance";
+    shaderLabAddPipeline(renderer, &effectPipeline, &r->skyPipeline);
+    effects.mComp.pFileName = "cloud_noise.comp";
+    shaderLabAddShader(renderer, &effects, &r->cloudShader);
+    effectPipeline.mComputeDesc.pShaderProgram = r->cloudShader;
+    effectPipeline.pName = "Cloud volume noise";
+    shaderLabAddPipeline(renderer, &effectPipeline, &r->cloudPipeline);
+    effects.mComp.pFileName = "water_sky_filter.comp";
+    shaderLabAddShader(renderer, &effects, &r->skyFilterShader);
+    effectPipeline.mComputeDesc.pShaderProgram = r->skyFilterShader;
+    PIPELINE_LAYOUT_DESC(effectPipeline, nullptr, SRT_LAYOUT_DESC(SkyFilter, PerFrame), nullptr, nullptr);
+    effectPipeline.pName = "Sky reflection mip filter";
+    shaderLabAddPipeline(renderer, &effectPipeline, &r->skyFilterPipeline);
 }
 OceanRenderer* createOceanRenderer(TFRenderer* renderer, unsigned n)
 {
@@ -265,19 +308,7 @@ OceanRenderer* createOceanRenderer(TFRenderer* renderer, unsigned n)
                 buffer(r, sizeof(OceanParameters), TF_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16, TF_RESOURCE_MEMORY_USAGE_CPU_TO_GPU);
     }
     waitForAllResourceLoads();
-    const char* names[] = { "ocean_spectrum.comp", "ocean_fft.comp", "ocean_surface.comp", "ocean_packets.comp", "ocean_mip.comp" };
-    for (unsigned i = 0; i < 5; ++i)
-    {
-        TFShaderLoadDesc shader = {};
-        shader.mComp.pFileName = names[i];
-        addShader(renderer, &shader, &r->computeShaders[i]);
-        TFPipelineDesc pipeline = {};
-        pipeline.mType = TF_PIPELINE_TYPE_COMPUTE;
-        pipeline.pName = names[i];
-        pipeline.mComputeDesc.pShaderProgram = r->computeShaders[i];
-        PIPELINE_LAYOUT_DESC(pipeline, nullptr, SRT_LAYOUT_DESC(OceanCompute, PerFrame), nullptr, nullptr);
-        addPipeline(renderer, &pipeline, &r->computePipelines[i]);
-    }
+    loadOceanComputeShaders(r);
     TFDescriptorSetDesc set = SRT_SET_DESC(OceanCompute, PerFrame, 2 * r->passes, 0);
     addDescriptorSet(renderer, &set, &r->computeSets);
     for (unsigned f = 0; f < 2; ++f)
@@ -315,7 +346,7 @@ OceanRenderer* createOceanRenderer(TFRenderer* renderer, unsigned n)
             data[8].ppBuffers = &r->whitewater[1 - f];
             data[9].mIndex = SRT_RES_IDX(OceanCompute, PerFrame, gWhitewaterOutput);
             data[9].ppBuffers = &r->whitewater[f];
-            updateDescriptorSet(renderer, f * r->passes + p, r->computeSets, TF_ARRAY_COUNT(data), data);
+            shaderLabUpdateDescriptorSet(renderer, f * r->passes + p, r->computeSets, TF_ARRAY_COUNT(data), data);
         }
     TFTextureLoadDesc foamTexture = {};
     foamTexture.pFileName = "FoamLace.ktx";
@@ -340,31 +371,6 @@ OceanRenderer* createOceanRenderer(TFRenderer* renderer, unsigned n)
     set = SRT_SET_DESC(WaterDraw, PerFrame, 2, 0);
     addDescriptorSet(renderer, &set, &r->drawSets);
     bindOceanResources(r);
-    TFShaderLoadDesc effects = {};
-    effects.mComp.pFileName = "water_effects.comp";
-    addShader(renderer, &effects, &r->effectsShader);
-    TFPipelineDesc effectPipeline = {};
-    effectPipeline.mType = TF_PIPELINE_TYPE_COMPUTE;
-    effectPipeline.mComputeDesc.pShaderProgram = r->effectsShader;
-    PIPELINE_LAYOUT_DESC(effectPipeline, nullptr, SRT_LAYOUT_DESC(WaterDraw, PerFrame), nullptr, nullptr);
-    effectPipeline.pName = "Whitewater transport and particles";
-    addPipeline(renderer, &effectPipeline, &r->effectsPipeline);
-    effects.mComp.pFileName = "water_sky.comp";
-    addShader(renderer, &effects, &r->skyShader);
-    effectPipeline.mComputeDesc.pShaderProgram = r->skyShader;
-    effectPipeline.pName = "Sky radiance";
-    addPipeline(renderer, &effectPipeline, &r->skyPipeline);
-    effects.mComp.pFileName = "cloud_noise.comp";
-    addShader(renderer, &effects, &r->cloudShader);
-    effectPipeline.mComputeDesc.pShaderProgram = r->cloudShader;
-    effectPipeline.pName = "Cloud volume noise";
-    addPipeline(renderer, &effectPipeline, &r->cloudPipeline);
-    effects.mComp.pFileName = "water_sky_filter.comp";
-    addShader(renderer, &effects, &r->skyFilterShader);
-    effectPipeline.mComputeDesc.pShaderProgram = r->skyFilterShader;
-    PIPELINE_LAYOUT_DESC(effectPipeline, nullptr, SRT_LAYOUT_DESC(SkyFilter, PerFrame), nullptr, nullptr);
-    effectPipeline.pName = "Sky reflection mip filter";
-    addPipeline(renderer, &effectPipeline, &r->skyFilterPipeline);
     set = SRT_SET_DESC(SkyFilter, PerFrame, r->logSize + 1, 0);
     addDescriptorSet(renderer, &set, &r->skyFilterSets);
     for (unsigned level = 1; level <= r->logSize + 1; ++level)
@@ -383,7 +389,7 @@ OceanRenderer* createOceanRenderer(TFRenderer* renderer, unsigned n)
         data[2].mIndex = SRT_RES_IDX(SkyFilter, PerFrame, gFiltered);
         data[2].mUseTextureDescriptors = true;
         data[2].ppTextureDescriptors = &r->skyMips[level];
-        updateDescriptorSet(renderer, level - 1, r->skyFilterSets, TF_ARRAY_COUNT(data), data);
+        shaderLabUpdateDescriptorSet(renderer, level - 1, r->skyFilterSets, TF_ARRAY_COUNT(data), data);
     }
     return r;
 }
@@ -393,13 +399,73 @@ void setOceanScene(OceanRenderer* r, TFRenderTarget* opaque, TFRenderTarget* ref
     bindOceanResources(r, opaque, reflection, shadow, waterLight);
 }
 
+static void registerOceanShaderLabResources(OceanRenderer* r, unsigned frame)
+{
+#if defined(MOORING_SHADER_LAB)
+    const unsigned current = frame % 2, previous = 1 - current;
+    ShaderLabBufferLayout field{ r->size, r->size, 4, r->logSize + 1, 16, 4, ShaderLabScalar::Float,
+                                 "X/Z displacement, Y height, W foam" };
+    shaderLabRegisterBuffer(r, "Water / Surface (current)", r->surface[current], field);
+    shaderLabRegisterBuffer(r, "Water / Surface (previous)", r->surface[previous], field);
+    field.channels = "XY slope, Z second moment, W Jacobian";
+    shaderLabRegisterBuffer(r, "Water / Normals", r->normals, field);
+    field.bands = 2; field.stride = 8; field.scalar = ShaderLabScalar::Half;
+    field.channels = "Foam age mass, air, air depth mass, active breaking";
+    shaderLabRegisterBuffer(r, "Whitewater / Current", r->whitewater[current], field);
+    shaderLabRegisterBuffer(r, "Whitewater / Previous", r->whitewater[previous], field);
+    field.width = field.height = 256; field.bands = field.mips = 1;
+    shaderLabRegisterBuffer(r, "Whitewater / Local current", r->localWhitewater[current], field);
+    shaderLabRegisterBuffer(r, "Whitewater / Local previous", r->localWhitewater[previous], field);
+    field.stride = 16; field.scalar = ShaderLabScalar::Float; field.channels = "Density, height, velocity X/Z";
+    shaderLabRegisterBuffer(r, "Foam / Current", r->foam[current], field);
+    shaderLabRegisterBuffer(r, "Foam / Previous", r->foam[previous], field);
+    field.width = 3; field.height = 4096; field.channels = "Columns: position/age, velocity/lifetime, metadata";
+    shaderLabRegisterBuffer(r, "Particles / Current", r->spray[current], field);
+    shaderLabRegisterBuffer(r, "Particles / Previous", r->spray[previous], field);
+    field.width = 16; field.height = 16; field.channels = "Position X/Z, emission, age";
+    shaderLabRegisterBuffer(r, "Crests / Current", r->crests[current], field);
+    shaderLabRegisterBuffer(r, "Crests / Previous", r->crests[previous], field);
+    field.width = LocalWaterSize; field.height = LocalWaterSize; field.channels = "Local surface float4";
+    shaderLabRegisterBuffer(r, "Water / Local surface", r->local, field);
+    auto linear = [&](const char* name, TFBuffer* buffer, unsigned stride = 16, unsigned components = 4,
+                      ShaderLabScalar scalar = ShaderLabScalar::Float)
+    {
+        ShaderLabBufferLayout layout{ unsigned(buffer->mSize / stride), 1, 1, 1, stride, components, scalar, "Raw components" };
+        shaderLabRegisterBuffer(r, name, buffer, layout);
+    };
+    linear("Water / Parameters", r->camera[current]);
+    linear("Ocean / Spectrum", r->spectrum[current]);
+    linear("Ocean / FFT transform", r->transform);
+    linear("Ocean / Twiddles", r->twiddles, 8, 2);
+    linear("Ocean / Wave packets", r->packets[current]);
+    for (unsigned pass = 0; pass < r->passes; ++pass)
+    {
+        char name[64]; snprintf(name, sizeof name, "Ocean / Constants pass %u", pass);
+        linear(name, r->uniform[current][pass]);
+    }
+    for (unsigned grid = 0; grid < 3; ++grid)
+    {
+        char name[64]; snprintf(name, sizeof name, "Water / Grid indices %u", grid);
+        linear(name, r->gridIndices[grid], 4, 1, ShaderLabScalar::Uint);
+    }
+    shaderLabRegisterTexture(r, "Sky / Radiance", r->sky);
+    shaderLabRegisterTexture(r, "Clouds / Volume noise", r->cloudNoise);
+    shaderLabRegisterTexture(r, "Foam / Lace texture", r->foamTexture);
+#endif
+}
+
+void bindOceanShaderLabResources(OceanRenderer* r, TFCmd* command, unsigned frame)
+{
+    ::cmdBindDescriptorSet(command, frame % 2, r->drawSets);
+}
+
 void loadOceanRenderer(OceanRenderer* r, uint32_t format)
 {
     MTRACY_ZONE("loadOceanRenderer");
     TFShaderLoadDesc shader = {};
     shader.mVert.pFileName = "water.vert";
     shader.mFrag.pFileName = "water.frag";
-    addShader(r->renderer, &shader, &r->drawShader);
+    shaderLabAddShader(r->renderer, &shader, &r->drawShader);
     TFPipelineDesc p = {};
     p.mType = TF_PIPELINE_TYPE_GRAPHICS;
     PIPELINE_LAYOUT_DESC(p, nullptr, SRT_LAYOUT_DESC(WaterDraw, PerFrame), nullptr, nullptr);
@@ -419,18 +485,18 @@ void loadOceanRenderer(OceanRenderer* r, uint32_t format)
     g.mSampleCount = TF_SAMPLE_COUNT_1;
     g.mPrimitiveTopo = TF_PRIMITIVE_TOPO_TRI_LIST;
     p.pName = "Ocean surface";
-    addPipeline(r->renderer, &p, &r->drawPipeline);
+    shaderLabAddPipeline(r->renderer, &p, &r->drawPipeline);
     shader.mVert.pFileName = "water_light.vert";
     shader.mFrag.pFileName = "water_light.frag";
-    addShader(r->renderer, &shader, &r->lightShader);
+    shaderLabAddShader(r->renderer, &shader, &r->lightShader);
     g.pShaderProgram = r->lightShader;
     color = TinyImageFormat_R32_SFLOAT;
     p.pName = "Water light depth";
-    addPipeline(r->renderer, &p, &r->lightPipeline);
+    shaderLabAddPipeline(r->renderer, &p, &r->lightPipeline);
     color = static_cast<TinyImageFormat>(format);
     shader.mVert.pFileName = "water_spray.vert";
     shader.mFrag.pFileName = "water_spray.frag";
-    addShader(r->renderer, &shader, &r->sprayShader);
+    shaderLabAddShader(r->renderer, &shader, &r->sprayShader);
     g.pShaderProgram = r->sprayShader;
     depth.mDepthWrite = false;
     TFBlendStateDesc blend = {};
@@ -441,46 +507,96 @@ void loadOceanRenderer(OceanRenderer* r, uint32_t format)
     blend.mRenderTargetMask = TF_BLEND_STATE_TARGET_0;
     g.pBlendState = &blend;
     p.pName = "Foam and spray";
-    addPipeline(r->renderer, &p, &r->sprayPipeline);
+    shaderLabAddPipeline(r->renderer, &p, &r->sprayPipeline);
 }
 void unloadOceanRenderer(OceanRenderer* r)
 {
     MTRACY_ZONE("unloadOceanRenderer");
-    removePipeline(r->renderer, r->drawPipeline);
-    removeShader(r->renderer, r->drawShader);
-    removePipeline(r->renderer, r->sprayPipeline);
-    removeShader(r->renderer, r->sprayShader);
-    removePipeline(r->renderer, r->lightPipeline);
-    removeShader(r->renderer, r->lightShader);
+    shaderLabRemovePipeline(r->renderer, r->drawPipeline);
+    shaderLabRemoveShader(r->renderer, r->drawShader);
+    shaderLabRemovePipeline(r->renderer, r->sprayPipeline);
+    shaderLabRemoveShader(r->renderer, r->sprayShader);
+    shaderLabRemovePipeline(r->renderer, r->lightPipeline);
+    shaderLabRemoveShader(r->renderer, r->lightShader);
+}
+static void unloadOceanComputeShaders(OceanRenderer* r)
+{
+    shaderLabRemovePipeline(r->renderer, r->effectsPipeline);
+    shaderLabRemoveShader(r->renderer, r->effectsShader);
+    shaderLabRemovePipeline(r->renderer, r->skyPipeline);
+    shaderLabRemoveShader(r->renderer, r->skyShader);
+    shaderLabRemovePipeline(r->renderer, r->cloudPipeline);
+    shaderLabRemoveShader(r->renderer, r->cloudShader);
+    shaderLabRemovePipeline(r->renderer, r->skyFilterPipeline);
+    shaderLabRemoveShader(r->renderer, r->skyFilterShader);
+    for (unsigned index = 0; index < 5; ++index)
+    {
+        shaderLabRemovePipeline(r->renderer, r->computePipelines[index]);
+        shaderLabRemoveShader(r->renderer, r->computeShaders[index]);
+    }
+}
+bool reloadOceanShaders(OceanRenderer* r, uint32_t format)
+{
+    auto* pending = static_cast<OceanRenderer*>(tf_calloc(1, sizeof(OceanRenderer)));
+    pending->renderer = r->renderer;
+    loadOceanComputeShaders(pending);
+    loadOceanRenderer(pending, format);
+    bool valid = true;
+    valid &= pending->effectsPipeline != nullptr;
+    valid &= pending->skyPipeline != nullptr;
+    valid &= pending->cloudPipeline != nullptr;
+    valid &= pending->skyFilterPipeline != nullptr;
+    valid &= pending->drawPipeline != nullptr;
+    valid &= pending->lightPipeline != nullptr;
+    valid &= pending->sprayPipeline != nullptr;
+    for (unsigned index = 0; index < 5; ++index)
+        valid &= pending->computePipelines[index] != nullptr;
+    if (valid)
+    {
+        std::swap(r->effectsPipeline, pending->effectsPipeline);
+        std::swap(r->effectsShader, pending->effectsShader);
+        std::swap(r->skyPipeline, pending->skyPipeline);
+        std::swap(r->skyShader, pending->skyShader);
+        std::swap(r->cloudPipeline, pending->cloudPipeline);
+        std::swap(r->cloudShader, pending->cloudShader);
+        std::swap(r->skyFilterPipeline, pending->skyFilterPipeline);
+        std::swap(r->skyFilterShader, pending->skyFilterShader);
+        std::swap(r->drawPipeline, pending->drawPipeline);
+        std::swap(r->drawShader, pending->drawShader);
+        std::swap(r->lightPipeline, pending->lightPipeline);
+        std::swap(r->lightShader, pending->lightShader);
+        std::swap(r->sprayPipeline, pending->sprayPipeline);
+        std::swap(r->sprayShader, pending->sprayShader);
+        for (unsigned index = 0; index < 5; ++index)
+        {
+            std::swap(r->computePipelines[index], pending->computePipelines[index]);
+            std::swap(r->computeShaders[index], pending->computeShaders[index]);
+        }
+        r->cloudReady = false;
+        r->skyCover = -1;
+    }
+    unloadOceanRenderer(pending);
+    unloadOceanComputeShaders(pending);
+    tf_free(pending);
+    return valid;
 }
 void destroyOceanRenderer(OceanRenderer* r)
 {
     MTRACY_ZONE("destroyOceanRenderer");
-    removeDescriptorSet(r->renderer, r->skyFilterSets);
-    removePipeline(r->renderer, r->skyFilterPipeline);
-    removeShader(r->renderer, r->skyFilterShader);
+    shaderLabForgetResources(r);
+    shaderLabRemoveDescriptorSet(r->renderer, r->skyFilterSets);
     for (unsigned level = 0; level <= r->logSize; ++level)
         removeResource(r->skyFilterParameters[level]);
     for (unsigned level = 0; level <= r->logSize + 1; ++level)
         removeTextureDescriptor(r->renderer, r->skyMips[level]);
-    removePipeline(r->renderer, r->cloudPipeline);
-    removeShader(r->renderer, r->cloudShader);
     removeResource(r->cloudNoise);
-    removePipeline(r->renderer, r->skyPipeline);
-    removeShader(r->renderer, r->skyShader);
     removeResource(r->sky);
-    removePipeline(r->renderer, r->effectsPipeline);
-    removeShader(r->renderer, r->effectsShader);
     removeResource(r->foamTexture);
     for (auto* indices : r->gridIndices)
         removeResource(indices);
-    removeDescriptorSet(r->renderer, r->drawSets);
-    removeDescriptorSet(r->renderer, r->computeSets);
-    for (unsigned i = 0; i < 5; ++i)
-    {
-        removePipeline(r->renderer, r->computePipelines[i]);
-        removeShader(r->renderer, r->computeShaders[i]);
-    }
+    shaderLabRemoveDescriptorSet(r->renderer, r->drawSets);
+    shaderLabRemoveDescriptorSet(r->renderer, r->computeSets);
+    unloadOceanComputeShaders(r);
     for (unsigned f = 0; f < 2; ++f)
     {
         for (unsigned p = 0; p < r->passes; ++p)
@@ -503,6 +619,7 @@ void destroyOceanRenderer(OceanRenderer* r)
 }
 void computeOcean(OceanRenderer* r, TFCmd* cmd, const Ocean* ocean, unsigned f, float time, const WaterLook& look)
 {
+    registerOceanShaderLabResources(r, f);
     MTRACY_ZONE("computeOcean");
     const auto&    sea = seaState(ocean);
     const unsigned n = r->size;
@@ -546,8 +663,8 @@ void computeOcean(OceanRenderer* r, TFCmd* cmd, const Ocean* ocean, unsigned f, 
         if (pipeline == 4)
             params.transform[1] = p - r->surfacePass - 1;
         upload(r->uniform[f][p], &params, sizeof params);
-        cmdBindPipeline(cmd, r->computePipelines[pipeline]);
-        cmdBindDescriptorSet(cmd, f * r->passes + p, r->computeSets);
+        shaderLabBindPipeline(cmd, r->computePipelines[pipeline]);
+        shaderLabBindDescriptorSet(cmd, f * r->passes + p, r->computeSets);
         if (pipeline == 3)
             cmdDispatch(cmd, LocalWaterSize / 8, LocalWaterSize / 8, 1);
         else if (pipeline == 4)
@@ -587,6 +704,7 @@ void prepareOceanEffects(OceanRenderer* r, TFCmd* cmd, const Camera& camera, uns
     params.patch[2] = r->patchCenter.z;
     params.screen[0] = float(camera.width);
     params.screen[1] = float(camera.height);
+    params.shaderPreview = shaderLabProbeDisplay();
     params.screen[2] = r->lastTime;
     params.screen[3] = r->waterDepth;
     params.current = float4(toForge(r->current));
@@ -650,15 +768,15 @@ void prepareOceanEffects(OceanRenderer* r, TFCmd* cmd, const Camera& camera, uns
     beginWaterPass(cmd, profile, WaterEffects);
     if (!r->cloudReady)
     {
-        cmdBindPipeline(cmd, r->cloudPipeline);
-        cmdBindDescriptorSet(cmd, frame, r->drawSets);
+        shaderLabBindPipeline(cmd, r->cloudPipeline);
+        shaderLabBindDescriptorSet(cmd, frame, r->drawSets);
         cmdDispatch(cmd, 16, 16, 16);
         TFTextureBarrier cloud = { r->cloudNoise, TF_RESOURCE_STATE_UNORDERED_ACCESS, TF_RESOURCE_STATE_SHADER_RESOURCE };
         cmdResourceBarrier(cmd, 0, nullptr, 1, &cloud, 0, nullptr);
         r->cloudReady = true;
     }
-    cmdBindPipeline(cmd, r->effectsPipeline);
-    cmdBindDescriptorSet(cmd, frame, r->drawSets);
+    shaderLabBindPipeline(cmd, r->effectsPipeline);
+    shaderLabBindDescriptorSet(cmd, frame, r->drawSets);
     cmdDispatch(cmd, 32, 32, 1);
     barrier(cmd, r->foam[frame]);
     barrier(cmd, r->spray[frame]);
@@ -668,18 +786,18 @@ void prepareOceanEffects(OceanRenderer* r, TFCmd* cmd, const Camera& camera, uns
     beginWaterPass(cmd, profile, WaterSky);
     TFTextureBarrier skyBarrier = { r->sky, TF_RESOURCE_STATE_SHADER_RESOURCE, TF_RESOURCE_STATE_UNORDERED_ACCESS };
     cmdResourceBarrier(cmd, 0, nullptr, 1, &skyBarrier, 0, nullptr);
-    cmdBindPipeline(cmd, r->skyPipeline);
-    cmdBindDescriptorSet(cmd, frame, r->drawSets);
+    shaderLabBindPipeline(cmd, r->skyPipeline);
+    shaderLabBindDescriptorSet(cmd, frame, r->drawSets);
     cmdDispatch(cmd, r->size / 2, r->size / 4, 1);
     skyBarrier.mCurrentState = TF_RESOURCE_STATE_UNORDERED_ACCESS;
     cmdResourceBarrier(cmd, 0, nullptr, 1, &skyBarrier, 0, nullptr);
     if (params.history[0] > 0 || skyReset)
     {
-        cmdBindPipeline(cmd, r->skyFilterPipeline);
+        shaderLabBindPipeline(cmd, r->skyFilterPipeline);
         for (unsigned level = 1; level <= r->logSize + 1; ++level)
         {
             unsigned height = (r->size * 2) >> level;
-            cmdBindDescriptorSet(cmd, level - 1, r->skyFilterSets);
+            shaderLabBindDescriptorSet(cmd, level - 1, r->skyFilterSets);
             cmdDispatch(cmd, (height * 2 + 7) / 8, (height + 7) / 8, 1);
             cmdResourceBarrier(cmd, 0, nullptr, 1, &skyBarrier, 0, nullptr);
         }
@@ -696,21 +814,21 @@ void prepareOceanEffects(OceanRenderer* r, TFCmd* cmd, const Camera& camera, uns
 void drawOcean(OceanRenderer* r, TFCmd* cmd, unsigned frame)
 {
     MTRACY_ZONE("drawOcean");
-    cmdBindPipeline(cmd, r->drawPipeline);
-    cmdBindDescriptorSet(cmd, frame, r->drawSets);
+    shaderLabBindPipeline(cmd, r->drawPipeline);
+    shaderLabBindDescriptorSet(cmd, frame, r->drawSets);
     cmdBindIndexBuffer(cmd, r->gridIndices[r->gridSize == 128 ? 0 : r->gridSize == 256 ? 1 : 2], TF_INDEX_TYPE_UINT32, 0);
     cmdDrawIndexed(cmd, r->gridSize * r->gridSize * 6, 0, 0);
     if (r->particleCapacity)
     {
-        cmdBindPipeline(cmd, r->sprayPipeline);
+        shaderLabBindPipeline(cmd, r->sprayPipeline);
         cmdDraw(cmd, r->particleCapacity * WATER_PARTICLE_VERTICES, 0);
     }
 }
 void drawOceanLight(OceanRenderer* r, TFCmd* cmd, unsigned frame)
 {
     MTRACY_ZONE("drawOceanLight");
-    cmdBindPipeline(cmd, r->lightPipeline);
-    cmdBindDescriptorSet(cmd, frame, r->drawSets);
+    shaderLabBindPipeline(cmd, r->lightPipeline);
+    shaderLabBindDescriptorSet(cmd, frame, r->drawSets);
     cmdBindIndexBuffer(cmd, r->gridIndices[r->gridSize == 128 ? 0 : r->gridSize == 256 ? 1 : 2], TF_INDEX_TYPE_UINT32, 0);
     cmdDrawIndexed(cmd, r->gridSize * r->gridSize * 6, 0, 0);
 }

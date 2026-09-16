@@ -2,9 +2,11 @@
 #include "../../Common/Application/Config.h"
 #include "Tracy.h"
 
-// The PoC has no script VM, asset conversion, animation, or shader reload server.
+// Development shader tools are enabled by the Debug CMake configuration.
 #undef ENABLE_FORGE_SCRIPTING
+#if !defined(MOORING_SHADER_LAB)
 #undef ENABLE_FORGE_RELOAD_SHADER
+#endif
 #undef ENABLE_FORGE_ANIMATION_DEBUG
 #undef ENABLE_FORGE_MATERIALS
 #ifndef ENABLE_SCREENSHOT

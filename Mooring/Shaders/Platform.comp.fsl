@@ -1,5 +1,6 @@
 #include "Platform.srt.h"
 NUM_THREADS(8, 8, 1)
+
 void CS_MAIN(SV_DispatchThreadID(uint3) id)
 {
     INIT_MAIN;

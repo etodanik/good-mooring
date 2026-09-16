@@ -1,97 +1,200 @@
+#define WATER_HASH_COORDINATE_SCALE           .1031
+#define WATER_HASH_MIX_OFFSET                 33.33
+#define CLOUD_BASE_HEIGHT_METERS              650
+#define CLOUD_CLEAR_LAYER_THICKNESS_METERS    1200
+#define CLOUD_STORM_THICKNESS_INCREASE_METERS 1900
+#define CLOUD_THICKENING_START_COVER          .55
+#define CLOUD_WEATHER_BROAD_SCALE_METERS      7000
+#define CLOUD_WEATHER_DETAIL_SCALE_METERS     2100
+#define CLOUD_WEATHER_DETAIL_OFFSET           19.7
+#define CLOUD_WEATHER_WARP_METERS             float2(2300, -1700)
+#define CLOUD_WIND_SHEAR_METERS               float2(260, 130)
+#define CLOUD_BASE_SCALE_METERS               float3(4400, 4000, 4400)
+#define CLOUD_BROAD_SCALE_METERS              float3(8300, 2600, 8300)
+#define CLOUD_BROAD_OFFSET                    float3(.37, .7, .13)
+#define CLOUD_EROSION_SCALE_METERS            320
+#define CLOUD_EROSION_FILTER_START_METERS     20.0
+#define CLOUD_EROSION_FILTER_END_METERS       120.0
+#define CLOUD_SHADOW_SAMPLES                  3
+#define CLOUD_SHADOW_MIN_SUN_ELEVATION        .05
+#define CLOUD_SHADOW_MIN_FOOTPRINT_METERS     30.0
+#define CLOUD_EXTINCTION_PER_METER            .012
+#define CLOUD_SUN_EXTINCTION                  5
+#define FOG_CLEAR_EXTINCTION_PER_METER        .0018
+#define FOG_RAIN_EXTINCTION_PER_METER         .0045
+#define PHASE_NORMALIZATION_FOUR_PI           12.5663706
+#define WATER_NORMAL_INCIDENCE_REFLECTANCE    .02037
+#define WATER_FRESNEL_REFLECTANCE_RANGE       .97963
+#define WATER_FRESNEL_VARIANCE_ATTENUATION    2.69
+#define WATER_FRESNEL_VARIANCE_NORMALIZATION  22.7
+#define FILMIC_NUMERATOR_QUADRATIC            2.51
+#define FILMIC_NUMERATOR_LINEAR               .03
+#define FILMIC_DENOMINATOR_QUADRATIC          2.43
+#define FILMIC_DENOMINATOR_LINEAR             .59
+#define FILMIC_DENOMINATOR_CONSTANT           .14
+#define SCENE_CLEAR_AMBIENT_COLOR             float3(.22, .32, .4)
+#define SCENE_OVERCAST_AMBIENT_COLOR          float3(.1, .14, .19)
+#define SCENE_SUN_COLOR                       float3(1, .9, .72)
+#define SCENE_DIRECT_LIGHT_STRENGTH           .85
+#define SKY_CLEAR_HORIZON_COLOR               float3(.24, .46, .72)
+#define SKY_CLEAR_ZENITH_COLOR                float3(.012, .085, .28)
+#define SKY_OVERCAST_HORIZON_COLOR            float3(.18, .22, .24)
+#define SKY_OVERCAST_ZENITH_COLOR             float3(.045, .06, .075)
+#define SKY_SUN_HALO_COLOR                    float3(1, .77, .42)
+#define SKY_SUN_HALO_EXPONENT                 48.0
+#define CLOUD_DRIFT_X_METERS_PER_SECOND       4
+#define CLOUD_DRIFT_Z_METERS_PER_SECOND       1.5
+#define CLOUD_BOTTOM_FADE_FRACTION            .055
+#define CLOUD_BILLOW_DENSITY_SCALE            1.8
+
 // Shared, linear-light art direction. Values are intentionally independent of
 // the physical spectrum: changing exposure or colour cannot change handling.
-float hashWater(float2 p)
+float hashWater(float2 coordinate)
 {
-    float3 q=frac(float3(p.x,p.y,p.x)*.1031);
-    q+=dot(q,q.yzx+33.33);
-    return frac((q.x+q.y)*q.z);
+    float3 mixedCoordinates = frac(float3(coordinate.x, coordinate.y, coordinate.x) * WATER_HASH_COORDINATE_SCALE);
+    mixedCoordinates += dot(mixedCoordinates, mixedCoordinates.yzx + WATER_HASH_MIX_OFFSET);
+    return frac((mixedCoordinates.x + mixedCoordinates.y) * mixedCoordinates.z);
 }
-float3 waterNoiseGradient(float2 p)
+
+float3 waterNoiseGradient(float2 coordinate)
 {
-    float2 i=floor(p), f=frac(p), derivative=6*f*(1-f); f=f*f*(3-2*f);
-    float a=hashWater(i), b=hashWater(i+float2(1,0));
-    float c=hashWater(i+float2(0,1)), d=hashWater(i+float2(1,1));
-    return float3(lerp(lerp(a,b,f.x),lerp(c,d,f.x),f.y),
-                  lerp(b-a,d-c,f.y)*derivative.x,lerp(c-a,d-b,f.x)*derivative.y);
+    float2 cell = floor(coordinate);
+    float2 blend = frac(coordinate);
+    float2 blendDerivative = 6 * blend * (1 - blend);
+    blend = blend * blend * (3 - 2 * blend);
+    float originValue = hashWater(cell);
+    float nextXValue = hashWater(cell + float2(1, 0));
+    float nextYValue = hashWater(cell + float2(0, 1));
+    float diagonalValue = hashWater(cell + float2(1, 1));
+    return float3(lerp(lerp(originValue, nextXValue, blend.x), lerp(nextYValue, diagonalValue, blend.x), blend.y),
+                  lerp(nextXValue - originValue, diagonalValue - nextYValue, blend.y) * blendDerivative.x,
+                  lerp(nextYValue - originValue, diagonalValue - nextXValue, blend.x) * blendDerivative.y);
 }
-float waterNoise(float2 p) { return waterNoiseGradient(p).x; }
-float2 cloudLayer(float cover) { return float2(650,1200+1900*smoothstep(.55,1.0,cover)); }
-float cloudDensity(float3 world,float cover,float time,float footprint)
+
+float waterNoise(float2 coordinate)
 {
-    float2 layer=cloudLayer(cover);
-    float h=(world.y-layer.x)/layer.y;
-    if(h<=0 || h>=1 || cover<=0) return 0;
-    float3 p=world+float3(time*4,0,time*1.5);
+    return waterNoiseGradient(coordinate).x;
+}
+
+float2 cloudLayer(float cover)
+{
+    return float2(CLOUD_BASE_HEIGHT_METERS,
+                  CLOUD_CLEAR_LAYER_THICKNESS_METERS +
+                      CLOUD_STORM_THICKNESS_INCREASE_METERS * smoothstep(CLOUD_THICKENING_START_COVER, 1.0, cover));
+}
+
+float cloudDensity(float3 world, float cover, float time, float footprint)
+{
+    float2 layer = cloudLayer(cover);
+    float layerFraction = (world.y - layer.x) / layer.y;
+    if (layerFraction <= 0 || layerFraction >= 1 || cover <= 0)
+        return 0;
+    float3 advectedPosition =
+        world + float3(time * CLOUD_DRIFT_X_METERS_PER_SECOND, 0, time * CLOUD_DRIFT_Z_METERS_PER_SECOND);
     // A broad, non-periodic weather field separates cloud groups and warps
     // the cached shape. Repeating the volume alone forms rows at the horizon.
-    float weather=.7*waterNoise(p.xz/7000)+.3*waterNoise(p.xz/2100+19.7);
+    float weather =
+        .7 * waterNoise(advectedPosition.xz / CLOUD_WEATHER_BROAD_SCALE_METERS) +
+        .3 * waterNoise(advectedPosition.xz / CLOUD_WEATHER_DETAIL_SCALE_METERS + CLOUD_WEATHER_DETAIL_OFFSET);
     // Weather controls whole cloud towers. Height variation and wind shear
     // prevent the volume from reading as a thin, repeated horizontal slab.
-    p.xz+=(weather-.5)*float2(2300,-1700)+h*h*float2(260,130);
-    float3 q=float3(p.x*.83+p.z*.55,p.y,p.z*.83-p.x*.55);
-    float base=SampleLvlTex3D(gCloudNoiseTexture,gSamplerTrilinearWrap,q/float3(4400,4000,4400),0).r;
-    float3 secondary=float3(q.z*.73+q.x*.68,q.y,q.x*.73-q.z*.68);
-    float broad=SampleLvlTex3D(gCloudNoiseTexture,gSamplerTrilinearWrap,secondary/float3(8300,2600,8300)+float3(.37,.7,.13),0).r;
-    base=base*.55+broad*.45;
-    float erosion=SampleLvlTex3D(gCloudNoiseTexture,gSamplerTrilinearWrap,p/320,0).g;
-    erosion=lerp(erosion,.5,smoothstep(20.0,120.0,footprint));
-    float coverage=smoothstep(.6-cover*.5,.85-cover*.7,weather);
+    advectedPosition.xz +=
+        (weather - .5) * CLOUD_WEATHER_WARP_METERS + layerFraction * layerFraction * CLOUD_WIND_SHEAR_METERS;
+    float3 rotatedPosition = float3(advectedPosition.x * .83 + advectedPosition.z * .55, advectedPosition.y,
+                                    advectedPosition.z * .83 - advectedPosition.x * .55);
+    float base =
+        SampleLvlTex3D(gCloudNoiseTexture, gSamplerTrilinearWrap, rotatedPosition / CLOUD_BASE_SCALE_METERS, 0).r;
+    float3 secondary = float3(rotatedPosition.z * .73 + rotatedPosition.x * .68, rotatedPosition.y,
+                              rotatedPosition.x * .73 - rotatedPosition.z * .68);
+    float broad = SampleLvlTex3D(gCloudNoiseTexture, gSamplerTrilinearWrap,
+                                 secondary / CLOUD_BROAD_SCALE_METERS + CLOUD_BROAD_OFFSET, 0)
+                      .r;
+    base = base * .55 + broad * .45;
+    float erosion =
+        SampleLvlTex3D(gCloudNoiseTexture, gSamplerTrilinearWrap, advectedPosition / CLOUD_EROSION_SCALE_METERS, 0).g;
+    erosion =
+        lerp(erosion, .5, smoothstep(CLOUD_EROSION_FILTER_START_METERS, CLOUD_EROSION_FILTER_END_METERS, footprint));
+    float coverage = smoothstep(.6 - cover * .5, .85 - cover * .7, weather);
     // Raise the density threshold with height instead of clipping a saturated
     // shape against a common roof. Individual billows keep rounded tops.
-    float threshold=.60-cover*.25+h*h*.35;
-    float density=saturate((base-threshold-erosion*.12)*6);
-    float billows=density*smoothstep(0.0,.055,h)*(1-smoothstep(.9,1.0,h))*coverage*1.8;
+    float threshold = .60 - cover * .25 + layerFraction * layerFraction * .35;
+    float density = saturate((base - threshold - erosion * .12) * 6);
+    float billows = density * smoothstep(0.0, CLOUD_BOTTOM_FADE_FRACTION, layerFraction) *
+                    (1 - smoothstep(.9, 1.0, layerFraction)) * coverage * CLOUD_BILLOW_DENSITY_SCALE;
     // Heavy weather closes the gaps beneath the towers. Isolated bright
     // cumulus against a clear blue dome did not describe an overcast storm.
-    float stratus=(.03+.28*base*base)*smoothstep(.65,.95,cover);
-    stratus*=smoothstep(0.0,.055,h)*(1-smoothstep(.18,.48,h));
-    return max(billows,stratus);
+    float stratus = (.03 + .28 * base * base) * smoothstep(.65, .95, cover);
+    stratus *= smoothstep(0.0, CLOUD_BOTTOM_FADE_FRACTION, layerFraction) * (1 - smoothstep(.18, .48, layerFraction));
+    return max(billows, stratus);
 }
-float cloudShadow(float3 world,float cover,float time,float footprint,float3 sun)
+
+float cloudShadow(float3 world, float cover, float time, float footprint, float3 sun)
 {
-    float opticalDepth=0;
-    float2 layer=cloudLayer(cover);
-    for(uint i=0;i<3;i++)
+    float opticalDepth = 0;
+    float2 layer = cloudLayer(cover);
+    for (uint sampleIndex = 0; sampleIndex < CLOUD_SHADOW_SAMPLES; sampleIndex++)
     {
-        float height=layer.x+(float(i)+.5)*layer.y/3;
-        float distance=max(0.0,(height-world.y)/max(.05,sun.y));
-        opticalDepth+=cloudDensity(world+sun*distance,cover,time,max(footprint,30.0))*layer.y/(3*max(.05,sun.y));
+        float height = layer.x + (float(sampleIndex) + .5) * layer.y / CLOUD_SHADOW_SAMPLES;
+        float distance = max(0.0, (height - world.y) / max(CLOUD_SHADOW_MIN_SUN_ELEVATION, sun.y));
+        opticalDepth +=
+            cloudDensity(world + sun * distance, cover, time, max(footprint, CLOUD_SHADOW_MIN_FOOTPRINT_METERS)) *
+            layer.y / (CLOUD_SHADOW_SAMPLES * max(CLOUD_SHADOW_MIN_SUN_ELEVATION, sun.y));
     }
-    return exp(-opticalDepth*.012);
+    return exp(-opticalDepth * CLOUD_EXTINCTION_PER_METER);
 }
-float sunTransmission(float cover) { return exp(-5*cover*cover*cover*cover); }
-float waterFog(float distance,float rain) { return 1-exp(-distance*(.0018+rain*.0045)); }
-float3 diffuseWaterScene(float3 world,float3 normal,float cover,float time,float3 sun)
+
+float sunTransmission(float cover)
 {
-    float direct=max(dot(normal,sun),0.0)*sunTransmission(cover)*cloudShadow(world,cover,time,0,sun);
-    return lerp(float3(.22,.32,.4),float3(.1,.14,.19),cover)+float3(1,.9,.72)*direct*.85;
+    return exp(-CLOUD_SUN_EXTINCTION * cover * cover * cover * cover);
 }
-float3 clearWaterSky(float3 direction,float cover,float3 light)
+
+float waterFog(float distance, float rain)
 {
-    float h=saturate(direction.y);
-    float3 clear=lerp(float3(.24,.46,.72),float3(.012,.085,.28),pow(h,.55));
-    float3 overcast=lerp(float3(.18,.22,.24),float3(.045,.06,.075),pow(h,.6));
-    float3 sky=lerp(clear,overcast,smoothstep(.35,.95,cover));
-    float sun=saturate(dot(direction,light));
+    return 1 - exp(-distance * (FOG_CLEAR_EXTINCTION_PER_METER + rain * FOG_RAIN_EXTINCTION_PER_METER));
+}
+
+float3 diffuseWaterScene(float3 world, float3 normal, float cover, float time, float3 sun)
+{
+    float direct = max(dot(normal, sun), 0.0) * sunTransmission(cover) * cloudShadow(world, cover, time, 0, sun);
+    return lerp(SCENE_CLEAR_AMBIENT_COLOR, SCENE_OVERCAST_AMBIENT_COLOR, cover) +
+           SCENE_SUN_COLOR * direct * SCENE_DIRECT_LIGHT_STRENGTH;
+}
+
+float3 clearWaterSky(float3 direction, float cover, float3 light)
+{
+    float elevation = saturate(direction.y);
+    float3 clear = lerp(SKY_CLEAR_HORIZON_COLOR, SKY_CLEAR_ZENITH_COLOR, pow(elevation, .55));
+    float3 overcast = lerp(SKY_OVERCAST_HORIZON_COLOR, SKY_OVERCAST_ZENITH_COLOR, pow(elevation, .6));
+    float3 sky = lerp(clear, overcast, smoothstep(.35, .95, cover));
+    float sun = saturate(dot(direction, light));
     // Direct sunlight on water is integrated by its BRDF, not counted twice.
-    sky+=float3(1,.77,.42)*pow(sun,48.0)*.14*sunTransmission(cover);
+    sky += SKY_SUN_HALO_COLOR * pow(sun, SKY_SUN_HALO_EXPONENT) * .14 * sunTransmission(cover);
     return sky;
 }
+
 // Henyey-Greenstein single-scattering phase, normalized over solid angle.
-float waterPhase(float cosine,float g)
+float waterPhase(float cosine, float anisotropy)
 {
-    return (1-g*g)/(12.5663706*pow(max(.05,1+g*g-2*g*cosine),1.5));
+    return (1 - anisotropy * anisotropy) /
+           (PHASE_NORMALIZATION_FOUR_PI * pow(max(.05, 1 + anisotropy * anisotropy - 2 * anisotropy * cosine), 1.5));
 }
-float meanWaterFresnel(float cosine,float slopeVariance)
+
+float meanWaterFresnel(float cosine, float slopeVariance)
 {
     // Bruneton et al., 2010, Eq. 26: unresolved facets mask one another at
     // grazing angles. A smooth-surface Fresnel over-brightens rough sky light.
     // The scalar moment assumes equal variance along both tangent axes.
-    float sigma=min(.5,sqrt(max(0.0,slopeVariance)*.5));
-    return .02037+.97963*pow(1-saturate(cosine),5*exp(-2.69*sigma))/(1+22.7*pow(sigma,1.5));
+    float sigma = min(.5, sqrt(max(0.0, slopeVariance) * .5));
+    return WATER_NORMAL_INCIDENCE_REFLECTANCE +
+           WATER_FRESNEL_REFLECTANCE_RANGE *
+               pow(1 - saturate(cosine), 5 * exp(-WATER_FRESNEL_VARIANCE_ATTENUATION * sigma)) /
+               (1 + WATER_FRESNEL_VARIANCE_NORMALIZATION * pow(sigma, 1.5));
 }
+
 float3 filmicWater(float3 color)
 {
-    color=max(color,0.0);
-    return saturate((color*(2.51*color+.03))/(color*(2.43*color+.59)+.14));
+    color = max(color, 0.0);
+    return saturate(
+        (color * (FILMIC_NUMERATOR_QUADRATIC * color + FILMIC_NUMERATOR_LINEAR)) /
+        (color * (FILMIC_DENOMINATOR_QUADRATIC * color + FILMIC_DENOMINATOR_LINEAR) + FILMIC_DENOMINATOR_CONSTANT));
 }

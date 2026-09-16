@@ -1,71 +1,88 @@
 #include "Water.srt.h"
 #include "WaterLighting.h.fsl"
-NUM_THREADS(8,8,1)
+
+#define SKY_MAX_TRACE_DISTANCE_METERS   60000.0
+#define SKY_GOLDEN_RATIO_JITTER         .618033989
+#define SKY_MIN_CLOUD_DENSITY           .001
+#define SKY_CLOUD_EXTINCTION_PER_METER  .012
+#define SKY_MULTIPLE_SCATTER_EXTINCTION .003
+
+NUM_THREADS(8, 8, 1)
+
 void CS_MAIN(SV_DispatchThreadID(uint3) id)
 {
     INIT_MAIN;
     // Clouds move metres per second across kilometre-scale shapes. Keep full
     // angular resolution, refreshing expensive Ultra rays over eight frames.
     // Weather edits and camera jumps still fill every direction immediately.
-    uint phases=gWater.sun.w>32?8u:4u;
-    uint phase=(id.x&(phases/2-1u))|((id.y&1u)*(phases/2));
-    if(gWater.history.w>0 && (gWater.history.x==0 || phase!=(uint(gWater.history.z)&(phases-1u))))
+    uint phases = gWater.sun.w > 32 ? 8u : 4u;
+    uint phase = (id.x & (phases / 2 - 1u)) | ((id.y & 1u) * (phases / 2));
+    if (gWater.history.w > 0 && (gWater.history.x == 0 || phase != (uint(gWater.history.z) & (phases - 1u))))
     {
         RETURN();
     }
-    uint height=uint(gWater.surface.x)*2, width=height*2;
-    float2 uv=(float2(id.xy)+.5)/float2(width,height);
-    float azimuth=(uv.x-.5)*6.28318530718, polar=uv.y*3.14159265359;
-    float3 direction=float3(cos(azimuth)*sin(polar),cos(polar),sin(azimuth)*sin(polar));
-    float cover=gWater.weather.x, time=gWater.screen.z;
-    float3 sky=clearWaterSky(direction,cover,gWater.sun.xyz);
-    float transmission=1, cloudOpacity=0; float3 radiance=float3(0,0,0);
-    if(direction.y>.005 && cover>0)
+    uint height = uint(gWater.surface.x) * 2;
+    uint width = height * 2;
+    float2 uv = (float2(id.xy) + .5) / float2(width, height);
+    float azimuth = (uv.x - .5) * 6.28318530718;
+    float polar = uv.y * 3.14159265359;
+    float3 direction = float3(cos(azimuth) * sin(polar), cos(polar), sin(azimuth) * sin(polar));
+    float cover = gWater.weather.x;
+    float time = gWater.screen.z;
+    float3 sky = clearWaterSky(direction, cover, gWater.sun.xyz);
+    float transmission = 1;
+    float cloudOpacity = 0;
+    float3 radiance = float3(0, 0, 0);
+    if (direction.y > .005 && cover > 0)
     {
-        float2 layer=cloudLayer(cover);
-        float start=max(0.0,(layer.x-gWater.eye.y)/direction.y);
-        float end=min(60000.0,(layer.x+layer.y-gWater.eye.y)/direction.y);
-        uint steps=uint(gWater.sun.w);
-        float stepLength=max(0.0,end-start)/float(steps);
+        float2 layer = cloudLayer(cover);
+        float start = max(0.0, (layer.x - gWater.eye.y) / direction.y);
+        float end = min(SKY_MAX_TRACE_DISTANCE_METERS, (layer.x + layer.y - gWater.eye.y) / direction.y);
+        uint steps = uint(gWater.sun.w);
+        float stepLength = max(0.0, end - start) / float(steps);
         // Shift the stratified samples each frame; the directional cache
         // accumulates them without tying integration noise to the camera.
-        float jitter=frac(hashWater(float2(id.xy))+gWater.history.z*.618033989);
-        for(uint i=0;i<steps;i++)
+        float jitter = frac(hashWater(float2(id.xy)) + gWater.history.z * SKY_GOLDEN_RATIO_JITTER);
+        for (uint viewSampleIndex = 0; viewSampleIndex < steps; viewSampleIndex++)
         {
-            float distance=start+(float(i)+jitter)*stepLength;
-            float3 world=gWater.eye.xyz+direction*distance;
-            float h=saturate((world.y-layer.x)/layer.y);
-            float footprint=max(distance*3.14159265/float(height),stepLength*.4);
-            float density=cloudDensity(world,cover,time,footprint);
-            if(density<.001) continue;
-            float opacity=1-exp(-density*stepLength*.012);
-            float opticalDepth=0;
-            for(uint j=0;j<3;j++)
+            float distance = start + (float(viewSampleIndex) + jitter) * stepLength;
+            float3 world = gWater.eye.xyz + direction * distance;
+            float layerFraction = saturate((world.y - layer.x) / layer.y);
+            float footprint = max(distance * 3.14159265 / float(height), stepLength * .4);
+            float density = cloudDensity(world, cover, time, footprint);
+            if (density < SKY_MIN_CLOUD_DENSITY)
+                continue;
+            float opacity = 1 - exp(-density * stepLength * SKY_CLOUD_EXTINCTION_PER_METER);
+            float opticalDepth = 0;
+            for (uint lightSampleIndex = 0; lightSampleIndex < 3; lightSampleIndex++)
             {
-                float step=layer.y*.12*pow(2.0,float(j));
-                opticalDepth+=cloudDensity(world+gWater.sun.xyz*step,cover,time,max(footprint,step*.2))*step;
+                float step = layer.y * .12 * pow(2.0, float(lightSampleIndex));
+                opticalDepth +=
+                    cloudDensity(world + gWater.sun.xyz * step, cover, time, max(footprint, step * .2)) * step;
             }
-            float cosine=dot(direction,gWater.sun.xyz);
-            float phase=.6+waterPhase(cosine,.55)*3;
-            float powder=lerp(.55+ .45*(1-exp(-density*12)),1.0,saturate(cosine));
-            float direct=exp(-opticalDepth*.012)*phase*powder;
-            float multiple=exp(-opticalDepth*.003)*.3;
-            float3 ambient=lerp(float3(.09,.15,.24),float3(.12,.135,.145),smoothstep(.65,.95,cover));
-            float3 lighting=ambient*(.6+.4*h)+float3(1,.92,.81)*(direct+multiple);
-            lighting*=lerp(1.0,.4,cover*cover);
-            radiance+=transmission*opacity*lighting;
-            transmission*=1-opacity;
-            if(transmission<.005) break;
+            float cosine = dot(direction, gWater.sun.xyz);
+            float phase = .6 + waterPhase(cosine, .55) * 3;
+            float powder = lerp(.55 + .45 * (1 - exp(-density * 12)), 1.0, saturate(cosine));
+            float direct = exp(-opticalDepth * SKY_CLOUD_EXTINCTION_PER_METER) * phase * powder;
+            float multiple = exp(-opticalDepth * SKY_MULTIPLE_SCATTER_EXTINCTION) * .3;
+            float3 ambient = lerp(float3(.09, .15, .24), float3(.12, .135, .145), smoothstep(.65, .95, cover));
+            float3 lighting = ambient * (.6 + .4 * layerFraction) + float3(1, .92, .81) * (direct + multiple);
+            lighting *= lerp(1.0, .4, cover * cover);
+            radiance += transmission * opacity * lighting;
+            transmission *= 1 - opacity;
+            if (transmission < .005)
+                break;
         }
-        float haze=exp(-start*(.000055+cover*.00005))*smoothstep(.005,.025,direction.y);
-        sky=lerp(sky,radiance+sky*transmission,haze);
-        cloudOpacity=(1-transmission)*haze;
+        float haze = exp(-start * (.000055 + cover * .00005)) * smoothstep(.005, .025, direction.y);
+        sky = lerp(sky, radiance + sky * transmission, haze);
+        cloudOpacity = (1 - transmission) * haze;
     }
-    float4 result=float4(sky,cloudOpacity);
+    float4 result = float4(sky, cloudOpacity);
     // Each thread owns one direction, so the existing persistent cache can
     // accumulate in place. Weather edits and camera jumps reset its history.
     // Preserve the temporal response when the update cadence changes.
-    if(gWater.history.w>0) result=lerp(result,LoadRWTex2D(gSkyOutput,id.xy),pow(gWater.history.w,float(phases)));
-    Write2D(gSkyOutput,id.xy,result);
+    if (gWater.history.w > 0)
+        result = lerp(result, LoadRWTex2D(gSkyOutput, id.xy), pow(gWater.history.w, float(phases)));
+    Write2D(gSkyOutput, id.xy, result);
     RETURN();
 }

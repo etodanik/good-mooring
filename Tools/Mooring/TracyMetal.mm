@@ -15,6 +15,7 @@ void util_barrier_required(TFCmd* cmd, const TFQueueType& encoderType);
 namespace
 {
 constexpr unsigned MaxEncoders = 256;
+constexpr unsigned SamplesPerEncoder = 4;
 struct Command;
 struct Queue
 {
@@ -34,6 +35,7 @@ struct Encoder
     uint64_t                   work;
     id<MTLCounterSampleBuffer> samples;
     NSUInteger                 startIndex, endIndex;
+    NSUInteger                 vertexEndIndex, fragmentStartIndex;
     const TFPipeline*          pipeline;
     bool                       namedPass;
     char                       name[128];
@@ -72,29 +74,60 @@ bool recording()
     return true;
 #endif
 }
-void publish(Queue* q, const Encoder& e, uint64_t start, uint64_t end)
+void beginZone(Queue* q, const Encoder& e, const char* name, uint32_t color, uint16_t query)
 {
     // Queue writes preserve the ORIGINAL CPU encode timestamps/thread, even
     // though publication waits for the GPU. IDs can be reused after GpuTime.
     using namespace tracy;
     const auto source =
-        Profiler::AllocSourceLocation(__LINE__, __FILE__, sizeof(__FILE__) - 1, "Metal encoder", 13, e.name, strlen(e.name), 0x5599CC);
+        Profiler::AllocSourceLocation(__LINE__, __FILE__, sizeof(__FILE__) - 1, "Metal encoder", 13, name, strlen(name), color);
     auto* item = Profiler::QueueSerial();
     MemWrite(&item->hdr.type, QueueType::GpuZoneBeginAllocSrcLocSerial);
     MemWrite(&item->gpuZoneBegin.cpuTime, e.cpuBegin);
     MemWrite(&item->gpuZoneBegin.srcloc, source);
     MemWrite(&item->gpuZoneBegin.thread, e.thread);
-    MemWrite(&item->gpuZoneBegin.queryId, uint16_t(0));
+    MemWrite(&item->gpuZoneBegin.queryId, query);
     MemWrite(&item->gpuZoneBegin.context, q->context);
     Profiler::QueueSerialFinish();
-    item = Profiler::QueueSerial();
+}
+void endZone(Queue* q, const Encoder& e, uint16_t query)
+{
+    using namespace tracy;
+    auto* item = Profiler::QueueSerial();
     MemWrite(&item->hdr.type, QueueType::GpuZoneEndSerial);
     MemWrite(&item->gpuZoneEnd.cpuTime, e.cpuEnd);
     MemWrite(&item->gpuZoneEnd.thread, e.thread);
-    MemWrite(&item->gpuZoneEnd.queryId, uint16_t(1));
+    MemWrite(&item->gpuZoneEnd.queryId, query);
     MemWrite(&item->gpuZoneEnd.context, q->context);
     Profiler::QueueSerialFinish();
+}
+void publish(Queue* q, const Encoder& e, uint64_t start, uint64_t end, uint64_t vertexEnd, uint64_t fragmentStart)
+{
+    // The children describe GPU stages of the same encoder. Their CPU spans
+    // retain that encoder's encode interval; there are no extra CPU scopes.
+    const bool stages = vertexEnd >= start && fragmentStart >= vertexEnd && fragmentStart <= end;
+    beginZone(q, e, e.name, 0x5599CC, 0);
+    if (stages)
+    {
+        char name[160];
+        snprintf(name, sizeof(name), "%s / Vertex", e.name);
+        beginZone(q, e, name, 0x77BB88, 2);
+        endZone(q, e, 3);
+        snprintf(name, sizeof(name), "%s / Fragment", e.name);
+        beginZone(q, e, name, 0xCC9955, 4);
+        endZone(q, e, 5);
+    }
+    endZone(q, e, 1);
+    // Emit timestamps in GPU order, with a distinct query ID for every open
+    // endpoint. Publishing the parent end first would move the clock backward.
     ___tracy_emit_gpu_time_serial({ int64_t(start), 0, q->context });
+    if (stages)
+    {
+        ___tracy_emit_gpu_time_serial({ int64_t(start), 2, q->context });
+        ___tracy_emit_gpu_time_serial({ int64_t(vertexEnd), 3, q->context });
+        ___tracy_emit_gpu_time_serial({ int64_t(fragmentStart), 4, q->context });
+        ___tracy_emit_gpu_time_serial({ int64_t(end), 5, q->context });
+    }
     ___tracy_emit_gpu_time_serial({ int64_t(end), 1, q->context });
 }
 void collectCompleted(Command* c)
@@ -140,7 +173,23 @@ void collectCompleted(Command* c)
                     }
                     continue;
                 }
-                publish(c->queue, e, start, end);
+                uint64_t vertexEnd = 0, fragmentStart = 0;
+                if (e.vertexEndIndex != MTLCounterDontSample && e.fragmentStartIndex != MTLCounterDontSample)
+                {
+                    if (e.vertexEndIndex >= first && e.vertexEndIndex <= last && e.fragmentStartIndex >= first &&
+                        e.fragmentStartIndex <= last)
+                    {
+                        vertexEnd = times[e.vertexEndIndex - first].timestamp;
+                        fragmentStart = times[e.fragmentStartIndex - first].timestamp;
+                    }
+                    if (vertexEnd < start || fragmentStart < vertexEnd || fragmentStart > end)
+                    {
+                        if (dropped.fetch_add(1) < 4)
+                            TracyMessageL("Discarded invalid Metal stage timestamps; the encoder interval remains available.");
+                        vertexEnd = fragmentStart = 0;
+                    }
+                }
+                publish(c->queue, e, start, end, vertexEnd, fragmentStart);
                 latest = std::max(latest, end);
             }
             c->lastTimestamp = latest;
@@ -188,8 +237,9 @@ Command* beginEncoder(TFCmd* cmd, const char* name)
     e.cpuBegin = tracy::Profiler::GetTime();
     e.thread = tracy::GetThreadHandle();
     e.samples = c->samples;
-    e.startIndex = c->current * 2;
-    e.endIndex = c->current * 2 + 1;
+    e.startIndex = c->current * SamplesPerEncoder;
+    e.endIndex = e.startIndex + 1;
+    e.vertexEndIndex = e.fragmentStartIndex = MTLCounterDontSample;
 #ifdef TF_ENABLE_GRAPHICS_DEBUG_ANNOTATION
     e.namedPass = cmd->mDebugMarker[0] != 0;
     snprintf(e.name, sizeof(e.name), "%s", e.namedPass ? cmd->mDebugMarker : name);
@@ -308,7 +358,7 @@ void mooringTracyMetalBeginCmd(TFCmd* cmd)
     {
         auto* desc = [[MTLCounterSampleBufferDescriptor alloc] init];
         desc.counterSet = c->queue->counters;
-        desc.sampleCount = MaxEncoders * 2;
+        desc.sampleCount = MaxEncoders * SamplesPerEncoder;
         desc.storageMode = MTLStorageModeShared;
         desc.label = @"Tracy encoder timestamps";
         NSError* error;
@@ -354,15 +404,17 @@ void mooringTracyMetalRender(TFCmd* cmd, MTLRenderPassDescriptor* desc)
             // when present; a second attachment would silently disable its data.
             e.samples = a.sampleBuffer;
             e.startIndex = a.startOfVertexSampleIndex;
+            e.vertexEndIndex = a.endOfVertexSampleIndex;
+            e.fragmentStartIndex = a.startOfFragmentSampleIndex;
             e.endIndex = a.endOfFragmentSampleIndex;
         }
         else
         {
             a.sampleBuffer = c->samples;
             a.startOfVertexSampleIndex = e.startIndex;
-            a.endOfVertexSampleIndex = MTLCounterDontSample;
-            a.startOfFragmentSampleIndex = MTLCounterDontSample;
-            a.endOfFragmentSampleIndex = e.endIndex;
+            a.endOfVertexSampleIndex = e.vertexEndIndex = e.startIndex + 1;
+            a.startOfFragmentSampleIndex = e.fragmentStartIndex = e.startIndex + 2;
+            a.endOfFragmentSampleIndex = e.endIndex = e.startIndex + 3;
         }
         for (unsigned i = 0; i < 8; ++i)
             if (desc.colorAttachments[i].loadAction == MTLLoadActionClear)
@@ -398,8 +450,8 @@ id<MTLBlitCommandEncoder> mooringTracyMetalBlit(TFCmd* cmd)
     {
         auto* a = desc.sampleBufferAttachments[0];
         a.sampleBuffer = c->samples;
-        a.startOfEncoderSampleIndex = c->current * 2;
-        a.endOfEncoderSampleIndex = c->current * 2 + 1;
+        a.startOfEncoderSampleIndex = c->encoders[c->current].startIndex;
+        a.endOfEncoderSampleIndex = c->encoders[c->current].endIndex;
         c->encoders[c->current].work = 1;
     }
     return [cmd->pCommandBuffer blitCommandEncoderWithDescriptor:desc];
@@ -411,6 +463,16 @@ void mooringTracyMetalEndEncoder(TFCmd* cmd)
         return;
     c->encoders[c->current].cpuEnd = tracy::Profiler::GetTime();
     c->current = -1;
+}
+void mooringTracyMetalNameEncoder(TFCmd* cmd, const char* name)
+{
+    // Call after the encoder's last draw/dispatch so pipeline labels cannot
+    // replace a more precise name for a shader used in several modes.
+    auto* c = static_cast<Command*>(cmd->pTracy);
+    if (c && c->current >= 0)
+        snprintf(c->encoders[c->current].name, sizeof(c->encoders[c->current].name), "%s", name);
+    if (cmd->pRenderEncoder)
+        cmd->pRenderEncoder.label = [NSString stringWithUTF8String:name];
 }
 void mooringTracyMetalWork(TFCmd* cmd, const char* kind, uint64_t count)
 {

@@ -1,4 +1,5 @@
 #include "WaterGeometry.h.fsl"
+
 WaterFragment VS_MAIN(SV_VertexID(uint) vertexIndex)
 {
     INIT_MAIN;

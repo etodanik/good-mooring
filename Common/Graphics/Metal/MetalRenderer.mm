@@ -3512,7 +3512,8 @@ void addGraphicsPipelineImpl(TFRenderer* pRenderer, const char* pName, const TFG
     if (!pPipeline->pRenderPipelineState)
     {
         LOGF(LogLevel::eERROR, "Failed to create render pipeline state, error:\n%s", [error.description UTF8String]);
-        ASSERT(false);
+        // Callers can retain an existing pipeline when a development reload fails.
+        SAFE_FREE(pPipeline);
         return;
     }
 

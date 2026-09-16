@@ -80,20 +80,53 @@ extern float (*gDPIScales)[2];
 
 /// VSync Toggle
 
-#if defined(ENABLE_FORGE_RELOAD_SHADER)
-static UIComponent* pReloadShaderComponent = NULL;
-#endif
-
 bool gCaptureCursorOnMouseDown = true;
 
 @interface ForgeApplication: NSApplication
+- (void)toggleEngineFullscreen:(id)sender;
 @end
 
 TFThermalStatus getThermalStatus(void) { return TF_THERMAL_STATUS_NOT_SUPPORTED; }
 
 @implementation ForgeApplication
+- (void)toggleEngineFullscreen:(id)sender
+{
+    UNREF_PARAM(sender);
+    if (!pApp || !pApp->mSettings.mInitialized || !gCurrentWindow.handle.window)
+        return;
+    NSEvent* event = self.currentEvent;
+    if (event.type == NSEventTypeKeyDown && event.isARepeat)
+        return;
+    toggleFullscreen(&gCurrentWindow);
+}
+
+- (BOOL)validateMenuItem:(NSMenuItem*)item
+{
+    if (item.action == @selector(toggleEngineFullscreen:))
+    {
+        item.title = gCurrentWindow.fullScreen ? @"Exit Full Screen" : @"Enter Full Screen";
+        return pApp && pApp->mSettings.mInitialized && gCurrentWindow.handle.window;
+    }
+    return [super validateMenuItem:item];
+}
+
 - (void)sendEvent:(NSEvent*)event
 {
+    if (event.type == NSEventTypeKeyDown)
+    {
+        extern bool                platformIsShortcutKey(unsigned);
+        NSView*                    gameView = (__bridge NSView*)gCurrentWindow.handle.window;
+        const NSEventModifierFlags shortcutModifiers =
+            NSEventModifierFlagControl | NSEventModifierFlagCommand | NSEventModifierFlagOption | NSEventModifierFlagShift;
+        // AppKit consumes Ctrl+F-keys for menu/Dock focus before the view's keyDown:.
+        // Handle our shortcuts first. Fn and Caps Lock do not change the binding.
+        if (gameView && self.keyWindow == gameView.window && !self.modalWindow &&
+            (event.modifierFlags & shortcutModifiers) == NSEventModifierFlagControl && platformIsShortcutKey(event.keyCode))
+        {
+            [gameView keyDown:event];
+            return;
+        }
+    }
     if ([event type] == NSEventTypeKeyUp)
     {
         [[[self mainWindow] firstResponder] tryToPerform:@selector(keyUp:) with:event];
@@ -375,6 +408,14 @@ int macOSMain(int argc, const char** argv, IApp* app)
         NSMenu* appMenu = [[NSMenu alloc] init];
         [appMenu addItemWithTitle:@"Quit Mooring Simulator" action:@selector(terminate:) keyEquivalent:@"q"];
         item.submenu = appMenu;
+        NSMenuItem* viewItem = [menu addItemWithTitle:@"View" action:nil keyEquivalent:@""];
+        NSMenu*     viewMenu = [[NSMenu alloc] initWithTitle:@"View"];
+        NSMenuItem* fullscreenItem = [viewMenu addItemWithTitle:@"Enter Full Screen"
+                                                         action:@selector(toggleEngineFullscreen:)
+                                                  keyEquivalent:@"f"];
+        fullscreenItem.keyEquivalentModifierMask = NSEventModifierFlagControl | NSEventModifierFlagCommand;
+        fullscreenItem.target = application;
+        viewItem.submenu = viewMenu;
         application.mainMenu = menu;
         [application activateIgnoringOtherApps:YES];
         [application run];

@@ -55,6 +55,7 @@ NSWindowLevel gDefaultWindowLevel = NSPopUpMenuWindowLevel;
 
 extern TFWindowDesc           gCurrentWindow;
 extern CustomMessageProcessor sCustomProc;
+static bool                   gFullscreenTransition;
 
 //------------------------------------------------------------------------
 // STATIC STRUCTS
@@ -207,6 +208,7 @@ static NSRect getCenteredWindowRect(TFWindowDesc* winDesc);
 
 - (id)initWithFrame:(NSRect)FrameRect device:(id<MTLDevice>)device display:(int)displayID hdr:(bool)hdr vsync:(bool)vsync;
 - (CVReturn)getFrameForTime:(const CVTimeStamp*)outputTime;
+- (void)syncDrawableSize;
 
 @end
 
@@ -253,6 +255,8 @@ static NSRect getCenteredWindowRect(TFWindowDesc* winDesc);
 
 - (void)windowDidBecomeMain:(NSNotification*)notification
 {
+    extern void platformKeyModifiers(bool);
+    platformKeyModifiers((NSEvent.modifierFlags & NSEventModifierFlagControl) != 0);
     [self.delegate didFocusChange:true];
     if (notification && sCustomProc)
     {
@@ -262,6 +266,8 @@ static NSRect getCenteredWindowRect(TFWindowDesc* winDesc);
 
 - (void)windowDidResignMain:(NSNotification*)notification
 {
+    extern void platformResetShortcutKeys();
+    platformResetShortcutKeys();
     [self.delegate didFocusChange:false];
     if (notification && sCustomProc)
     {
@@ -287,13 +293,7 @@ static NSRect getCenteredWindowRect(TFWindowDesc* winDesc);
         return;
     }
 
-    NSRect viewSize = [window.contentView frame];
-
-    [self.delegate didResize:viewSize.size];
-
-    const float  backingScale = self.window.backingScaleFactor;
-    const CGSize contentSize = self.frame.size;
-    metalLayer.drawableSize = CGSizeMake(contentSize.width * backingScale, contentSize.height * backingScale);
+    [self syncDrawableSize];
 
     if (!gCurrentWindow.fullScreen)
     {
@@ -308,21 +308,20 @@ static NSRect getCenteredWindowRect(TFWindowDesc* winDesc);
 
 - (void)windowDidEndLiveResize:(NSNotification*)notification
 {
-    if (gCurrentWindow.fullScreen)
-        return;
+    [self windowDidResize:notification];
+}
 
-    ForgeNSWindow* window = [notification object];
-    NSRect         viewSize = [window.contentView frame];
-
-    [self.delegate didResize:viewSize.size];
-
-    float          dpiScale[2];
-    const uint32_t monitorIdx = getActiveMonitorIdx();
-    getMonitorDpiScale(monitorIdx, dpiScale);
-    metalLayer.drawableSize = CGSizeMake(self.frame.size.width * dpiScale[0], self.frame.size.height * dpiScale[1]);
-
-    [window updateClientRect:&gCurrentWindow];
-    [window updateWindowedRect:&gCurrentWindow];
+- (void)syncDrawableSize
+{
+    const CGFloat scale = self.window.backingScaleFactor;
+    const NSSize  size = self.bounds.size;
+    metalLayer.contentsScale = scale;
+    metalLayer.drawableSize = CGSizeMake(size.width * scale, size.height * scale);
+    [self.delegate didResize:size];
+    // Cached events belong to the previous window geometry.
+    extern void platformResetPointerPosition();
+    platformResetPointerPosition();
+    [self updateTrackingAreas];
 }
 
 - (void)windowDidMove:(NSNotification*)notification
@@ -386,14 +385,52 @@ static NSRect getCenteredWindowRect(TFWindowDesc* winDesc);
     }
 }
 
+- (void)windowWillEnterFullScreen:(NSNotification*)notification
+{
+    ForgeNSWindow* window = [notification object];
+    [window updateWindowedRect:&gCurrentWindow];
+    gFullscreenTransition = true;
+    gCurrentWindow.fullScreen = true;
+    gCurrentWindow.mWindowMode = TF_WM_FULLSCREEN;
+}
+
+- (void)windowWillExitFullScreen:(NSNotification*)notification
+{
+    gFullscreenTransition = true;
+}
+
 - (void)windowDidEnterFullScreen:(NSNotification*)notification
 {
+    gFullscreenTransition = false;
     gCurrentWindow.fullScreen = true;
+    gCurrentWindow.mWindowMode = TF_WM_FULLSCREEN;
+    [self windowDidResize:notification];
 }
 
 - (void)windowDidExitFullScreen:(NSNotification*)notification
 {
+    gFullscreenTransition = false;
     gCurrentWindow.fullScreen = false;
+    gCurrentWindow.mWindowMode = gCurrentWindow.borderlessWindow ? TF_WM_BORDERLESS : TF_WM_WINDOWED;
+    [self.window setLevel:gDefaultWindowLevel];
+    [self windowDidResize:notification];
+}
+
+- (void)windowDidFailToEnterFullScreen:(NSWindow*)window
+{
+    gFullscreenTransition = false;
+    gCurrentWindow.fullScreen = false;
+    gCurrentWindow.mWindowMode = gCurrentWindow.borderlessWindow ? TF_WM_BORDERLESS : TF_WM_WINDOWED;
+    [window setLevel:gDefaultWindowLevel];
+    [self syncDrawableSize];
+}
+
+- (void)windowDidFailToExitFullScreen:(NSWindow*)window
+{
+    gFullscreenTransition = false;
+    gCurrentWindow.fullScreen = true;
+    gCurrentWindow.mWindowMode = TF_WM_FULLSCREEN;
+    [self syncDrawableSize];
 }
 
 - (CAMetalLayer*)metalLayer
@@ -409,16 +446,9 @@ static NSRect getCenteredWindowRect(TFWindowDesc* winDesc);
         [self removeTrackingArea:trackingAreas[t]];
     }
 
-    NSRect bounds = [self.window contentLayoutRect];
-    // Borderless - Trim edges so edges can respond to resize
-    // #TODO: Check if better way
-    if (gCurrentWindow.borderlessWindow)
-    {
-        bounds.size.width -= 2;
-        bounds.size.height -= 2;
-    }
-    NSTrackingAreaOptions options = (NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways);
-    NSTrackingArea*       trackingArea = [[NSTrackingArea alloc] initWithRect:bounds options:options owner:self userInfo:nil];
+    NSTrackingAreaOptions options =
+        NSTrackingMouseEnteredAndExited | NSTrackingMouseMoved | NSTrackingInVisibleRect | NSTrackingActiveInKeyWindow;
+    NSTrackingArea* trackingArea = [[NSTrackingArea alloc] initWithRect:NSZeroRect options:options owner:self userInfo:nil];
 
     [self addTrackingArea:trackingArea];
     [super updateTrackingAreas];
@@ -432,10 +462,10 @@ static NSRect getCenteredWindowRect(TFWindowDesc* winDesc);
 
 - (void)recordPointer:(NSEvent*)event
 {
-    extern void platformMousePosition(float, float);
-    NSPoint     point = [self convertPoint:event.locationInWindow fromView:nil];
-    CGFloat     scale = self.window.backingScaleFactor;
-    platformMousePosition(point.x * scale, (self.bounds.size.height - point.y) * scale);
+    extern void   platformMousePosition(float, float);
+    // Keep event coordinates in window space; input converts using the current view bounds.
+    const NSPoint point = event.locationInWindow;
+    platformMousePosition(point.x, point.y);
 }
 - (void)mouseMoved:(NSEvent*)event
 {
@@ -513,6 +543,8 @@ static NSRect getCenteredWindowRect(TFWindowDesc* winDesc);
 
 - (void)keyDown:(NSEvent*)nsEvent
 {
+    extern void platformKeyModifiers(bool);
+    platformKeyModifiers((nsEvent.modifierFlags & NSEventModifierFlagControl) != 0);
     extern void platformKeyButton(unsigned, bool);
     platformKeyButton(nsEvent.keyCode, true);
     extern void platformKeyChar(char32_t c);
@@ -533,6 +565,12 @@ static NSRect getCenteredWindowRect(TFWindowDesc* winDesc);
 {
     extern void platformKeyButton(unsigned, bool);
     platformKeyButton(nsEvent.keyCode, false);
+}
+
+- (void)flagsChanged:(NSEvent*)event
+{
+    extern void platformKeyModifiers(bool);
+    platformKeyModifiers((event.modifierFlags & NSEventModifierFlagControl) != 0);
 }
 
 // Helps with performance
@@ -902,7 +940,10 @@ bool isDebuggerAttached()
 void openWindow(const char* app_name, TFWindowDesc* winDesc, id<MTLDevice> device, id<RenderDestinationProvider> delegateRenderProvider,
                 int32_t monitorIndex)
 {
-    NSWindowStyleMask styleMask = PrepareStyleMask(winDesc);
+    // Create the ordinary window first; AppKit applies the fullscreen style during its transition.
+    TFWindowDesc windowedDesc = *winDesc;
+    windowedDesc.fullScreen = false;
+    NSWindowStyleMask styleMask = PrepareStyleMask(&windowedDesc);
     NSScreen*         activeScreen = getNSScreenFromIndex(monitorIndex);
 
     const float backingFactor = activeScreen.backingScaleFactor;
@@ -1090,50 +1131,18 @@ static void toggleBorderless(TFWindowDesc* winDesc)
 void toggleFullscreen(TFWindowDesc* winDesc)
 {
     ForgeMTLView* view = (__bridge ForgeMTLView*)(winDesc->handle.window);
-    if (view == nil)
+    if (view == nil || gFullscreenTransition)
     {
         return;
     }
 
     ForgeNSWindow* window = (ForgeNSWindow*)view.window;
 
-    bool isFullscreen = !(window.styleMask & NSWindowStyleMaskFullScreen);
-
-    float          dpiScale[2];
-    const uint32_t monitorIdx = getActiveMonitorIdx();
-    getMonitorDpiScale(monitorIdx, dpiScale);
-    if (isFullscreen)
-    {
-        winDesc->fullScreen = isFullscreen;
-        window.styleMask = PrepareStyleMask(winDesc);
-
-        NSSize size = { (CGFloat)getRectWidth(&winDesc->fullscreenRect) / dpiScale[0],
-                        (CGFloat)getRectHeight(&winDesc->fullscreenRect) / dpiScale[1] };
-        [window setContentSize:size];
-
-        [view.window setLevel:NSNormalWindowLevel];
-        winDesc->mWindowMode = TF_WM_FULLSCREEN;
-    }
-
+    // AppKit owns fullscreen geometry and restores the window frame on exit.
+    // Delegate notifications synchronize the engine and drawable after the transition.
+    gFullscreenTransition = true;
+    [window setLevel:NSNormalWindowLevel];
     [window toggleFullScreen:window];
-
-    if (!isFullscreen)
-    {
-        winDesc->fullScreen = isFullscreen;
-        NSWindowStyleMask styleMask = PrepareStyleMask(winDesc);
-
-        NSRect frameRect = convertRectToNSRect(winDesc->windowedRect, window);
-        NSRect contentRect = [NSWindow contentRectForFrameRect:frameRect styleMask:styleMask];
-
-        [window setFrame:contentRect display:true];
-
-        window.styleMask = styleMask;
-        [view.window setLevel:gDefaultWindowLevel];
-
-        [window setFrameOrigin:frameRect.origin];
-
-        winDesc->mWindowMode = winDesc->borderlessWindow ? TF_WM_BORDERLESS : TF_WM_WINDOWED;
-    }
 }
 
 void setWindowed(TFWindowDesc* winDesc)

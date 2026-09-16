@@ -1,31 +1,50 @@
 #include "Ocean.srt.h"
-#define CMUL(a,b) float2((a).x*(b).x-(a).y*(b).y,(a).x*(b).y+(a).y*(b).x)
-NUM_THREADS(8,8,1)
+
+#define OCEAN_SPECTRUM_HALF_SUPPORT 64
+#define OCEAN_SPECTRUM_SUPPORT      128
+#define OCEAN_TAU                   6.28318530718
+#define OCEAN_MIN_RELATIVE_DEPTH    .0001
+#define OCEAN_MAX_RELATIVE_DEPTH    10.0
+
+#define MULTIPLY_COMPLEX(left, right) \
+    float2((left).x*(right).x - (left).y * (right).y, (left).x * (right).y + (left).y * (right).x)
+NUM_THREADS(8, 8, 1)
+
 void CS_MAIN(SV_DispatchThreadID(uint3) id)
 {
     INIT_MAIN;
-    uint n=gOcean.transform.x;
-    int2 k=int2(id.xy); k-=int2(k.x>=int(n/2)?int(n):0,k.y>=int(n/2)?int(n):0);
-    uint index=id.z*n*n+id.y*n+id.x;
-    float4 output=float4(0,0,0,0);
-    if(abs(k.x)<64 && abs(k.y)<64)
+    uint resolution = gOcean.transform.x;
+    int2 waveMode = int2(id.xy);
+    waveMode -= int2(waveMode.x >= int(resolution / 2) ? int(resolution) : 0,
+                     waveMode.y >= int(resolution / 2) ? int(resolution) : 0);
+    uint index = id.z * resolution * resolution + id.y * resolution + id.x;
+    float4 output = float4(0, 0, 0, 0);
+    if (abs(waveMode.x) < OCEAN_SPECTRUM_HALF_SUPPORT && abs(waveMode.y) < OCEAN_SPECTRUM_HALF_SUPPORT)
     {
-        uint2 coord=uint2((k+128)%128), opposite=uint2((-k+128)%128);
-        float4 a=gSpectrum[id.z*128*128+coord.y*128+coord.x];
-        float4 b=gSpectrum[id.z*128*128+opposite.y*128+opposite.x];
-        float phase=a.z*gOcean.clockDepth.x;
-        float2 e=float2(cos(phase),-sin(phase));
-        float2 h=CMUL(a.xy,e)+CMUL(float2(b.x,-b.y),float2(e.x,-e.y));
-        float advection=dot(float2(k),gOcean.current.xz)*6.28318530718/gOcean.lengths[id.z]*gOcean.clockDepth.x;
-        h=CMUL(h,float2(cos(advection),-sin(advection)));
+        uint2 coord = uint2((waveMode + OCEAN_SPECTRUM_SUPPORT) % OCEAN_SPECTRUM_SUPPORT);
+        uint2 opposite = uint2((-waveMode + OCEAN_SPECTRUM_SUPPORT) % OCEAN_SPECTRUM_SUPPORT);
+        float4 spectrum = gSpectrum[id.z * OCEAN_SPECTRUM_SUPPORT * OCEAN_SPECTRUM_SUPPORT +
+                                    coord.y * OCEAN_SPECTRUM_SUPPORT + coord.x];
+        float4 oppositeSpectrum = gSpectrum[id.z * OCEAN_SPECTRUM_SUPPORT * OCEAN_SPECTRUM_SUPPORT +
+                                            opposite.y * OCEAN_SPECTRUM_SUPPORT + opposite.x];
+        float phase = spectrum.z * gOcean.clockDepth.x;
+        float2 phaseRotation = float2(cos(phase), -sin(phase));
+        float2 heightSpectrum = MULTIPLY_COMPLEX(spectrum.xy, phaseRotation) +
+                                MULTIPLY_COMPLEX(float2(oppositeSpectrum.x, -oppositeSpectrum.y),
+                                                 float2(phaseRotation.x, -phaseRotation.y));
+        float advection =
+            dot(float2(waveMode), gOcean.current.xz) * OCEAN_TAU / gOcean.lengths[id.z] * gOcean.clockDepth.x;
+        heightSpectrum = MULTIPLY_COMPLEX(heightSpectrum, float2(cos(advection), -sin(advection)));
         // Clamp the deep-water limit before fast-math tanh: large kh can
         // otherwise become inf/inf on Metal and poison an entire FFT band.
-        float kh=clamp(a.w*gOcean.clockDepth.z,.0001,10.0);
-        float factor=a.w>0 ? 6.28318530718/gOcean.lengths[id.z]/max(a.w,.000001)/tanh(kh) : 0;
-        float2 dx=float2(-h.y,h.x)*float(k.x)*factor;
-        float2 dz=float2(-h.y,h.x)*float(k.y)*factor;
-        output=float4(h,dx+float2(-dz.y,dz.x));
+        float relativeDepth =
+            clamp(spectrum.w * gOcean.clockDepth.z, OCEAN_MIN_RELATIVE_DEPTH, OCEAN_MAX_RELATIVE_DEPTH);
+        float factor =
+            spectrum.w > 0 ? OCEAN_TAU / gOcean.lengths[id.z] / max(spectrum.w, .000001) / tanh(relativeDepth) : 0;
+        float2 displacementX = float2(-heightSpectrum.y, heightSpectrum.x) * float(waveMode.x) * factor;
+        float2 displacementZ = float2(-heightSpectrum.y, heightSpectrum.x) * float(waveMode.y) * factor;
+        output = float4(heightSpectrum, displacementX + float2(-displacementZ.y, displacementZ.x));
     }
-    gDestination[index]=output;
+    gDestination[index] = output;
     RETURN();
 }

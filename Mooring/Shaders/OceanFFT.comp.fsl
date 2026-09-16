@@ -1,45 +1,59 @@
 #include "Ocean.srt.h"
-#define CMUL(a,b) float2((a).x*(b).x-(a).y*(b).y,(a).x*(b).y+(a).y*(b).x)
+
+#define OCEAN_SPECTRUM_HALF_SUPPORT 64
+
+#define MULTIPLY_COMPLEX(left, right) \
+    float2((left).x*(right).x - (left).y * (right).y, (left).x * (right).y + (left).y * (right).x)
 // One group owns a complete row or column. Keep the same Stockham butterflies
 // and operation order, with intermediate stages in shared memory instead of
 // dispatching and rereading the entire ocean for every stage.
 GroupShared(float4, transform[1024]);
-NUM_THREADS(256,1,1)
+NUM_THREADS(256, 1, 1)
+
 void CS_MAIN(SV_GroupThreadID(uint3) lane, SV_GroupID(uint3) group)
 {
     INIT_MAIN;
-    uint n=gOcean.transform.x, axis=gOcean.transform.z;
-    uint j=lane.x, row=group.y, base=group.z*n*n;
+    uint resolution = gOcean.transform.x;
+    uint axis = gOcean.transform.z;
+    uint butterflyIndex = lane.x;
+    uint row = group.y;
+    uint base = group.z * resolution * resolution;
     // Spectrum generation zero-fills rows outside the physical 128-mode
     // support. The in-place horizontal transform can leave those rows alone.
-    if(axis==0 && row>=64 && row<=n-64)
+    if (axis == 0 && row >= OCEAN_SPECTRUM_HALF_SUPPORT && row <= resolution - OCEAN_SPECTRUM_HALF_SUPPORT)
     {
         RETURN();
     }
-    uint a=axis!=0 ? j*n+row : row*n+j;
-    uint b=axis!=0 ? (j+n/2)*n+row : a+n/2;
-    if(j<n/2) {
-        transform[j]=gSource[base+a];
-        transform[j+n/2]=gSource[base+b];
+    uint firstIndex = axis != 0 ? butterflyIndex * resolution + row : row * resolution + butterflyIndex;
+    uint secondIndex = axis != 0 ? (butterflyIndex + resolution / 2) * resolution + row : firstIndex + resolution / 2;
+    if (butterflyIndex < resolution / 2)
+    {
+        transform[butterflyIndex] = gSource[base + firstIndex];
+        transform[butterflyIndex + resolution / 2] = gSource[base + secondIndex];
     }
     GroupMemoryBarrier();
-    uint source=0;
-    for(uint stride=1;stride<n;stride*=2) {
-        uint destination=n-source;
-        if(j<n/2) {
-            uint k=j&(stride-1), output=2*(j-k)+k;
-            float4 first=transform[source+j], second=transform[source+j+n/2];
-            float2 twiddle=gTwiddles[k*(n/(2*stride))];
-            second=float4(CMUL(second.xy,twiddle),CMUL(second.zw,twiddle));
-            transform[destination+output]=first+second;
-            transform[destination+output+stride]=first-second;
+    uint source = 0;
+    for (uint stride = 1; stride < resolution; stride *= 2)
+    {
+        uint destination = resolution - source;
+        if (butterflyIndex < resolution / 2)
+        {
+            uint twiddleIndex = butterflyIndex & (stride - 1);
+            uint output = 2 * (butterflyIndex - twiddleIndex) + twiddleIndex;
+            float4 first = transform[source + butterflyIndex];
+            float4 second = transform[source + butterflyIndex + resolution / 2];
+            float2 twiddle = gTwiddles[twiddleIndex * (resolution / (2 * stride))];
+            second = float4(MULTIPLY_COMPLEX(second.xy, twiddle), MULTIPLY_COMPLEX(second.zw, twiddle));
+            transform[destination + output] = first + second;
+            transform[destination + output + stride] = first - second;
         }
         GroupMemoryBarrier();
-        source=destination;
+        source = destination;
     }
-    if(j<n/2) {
-        gDestination[base+a]=transform[source+j];
-        gDestination[base+b]=transform[source+j+n/2];
+    if (butterflyIndex < resolution / 2)
+    {
+        gDestination[base + firstIndex] = transform[source + butterflyIndex];
+        gDestination[base + secondIndex] = transform[source + butterflyIndex + resolution / 2];
     }
     RETURN();
 }

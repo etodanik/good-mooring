@@ -2,305 +2,435 @@
 #include "WaterSampling.h.fsl"
 #include "WaterLighting.h.fsl"
 #include "Whitewater.h.fsl"
-float4 effectHistory(float2 world,bool whitewater)
+
+#define EFFECT_HISTORY_RESOLUTION                256
+#define EFFECT_HISTORY_CENTER_TEXEL              128
+#define EFFECT_HISTORY_LAST_FILTER_TEXEL         254
+#define EFFECT_PATCH_SIZE_METERS                 64
+#define CREST_GRID_RESOLUTION                    16
+#define CREST_GRID_HALF_RESOLUTION               8
+#define CREST_TRACKING_MAX_AGE_SECONDS           2.5
+#define EFFECT_PARTICLE_POOL_CAPACITY            4096
+#define EFFECT_GRAVITY_METERS_PER_SECOND_SQUARED 9.81
+#define EFFECT_PARTICLE_CULL_DISTANCE_METERS     200
+#define EFFECT_SURFACE_OFFSET_METERS             .035
+#define EFFECT_CREST_SOURCE_CAPACITY             256
+#define EFFECT_CREST_SAMPLE_FOOTPRINT_METERS     .35
+
+float4 effectHistory(float2 world, bool whitewater)
 {
-    float2 pixel=(world-gWater.foamPatch.zw)/64*256+128;
-    if(any(pixel<0) || any(pixel>254) || gWater.history.y==0) return whitewater?float4(0,0,0,0):float4(0,0,gWater.current.xz);
-    uint2 base=uint2(floor(pixel)); float2 f=frac(pixel); float4 result=float4(0,0,0,0);
-    for(uint y=0;y<2;y++) for(uint x=0;x<2;x++)
-    {
-        uint i=(base.y+y)*256+base.x+x;
-        result+=(whitewater?float4(gLocalWhitewaterHistory[i]):gFoamHistory[i])*(x!=0?f.x:1-f.x)*(y!=0?f.y:1-f.y);
-    }
+    float2 pixel = (world - gWater.foamPatch.zw) / EFFECT_PATCH_SIZE_METERS * EFFECT_HISTORY_RESOLUTION +
+                   EFFECT_HISTORY_CENTER_TEXEL;
+    if (any(pixel < 0) || any(pixel > EFFECT_HISTORY_LAST_FILTER_TEXEL) || gWater.history.y == 0)
+        return whitewater ? float4(0, 0, 0, 0) : float4(0, 0, gWater.current.xz);
+    uint2 base = uint2(floor(pixel));
+    float2 fraction = frac(pixel);
+    float4 result = float4(0, 0, 0, 0);
+    for (uint offsetY = 0; offsetY < 2; offsetY++)
+        for (uint offsetX = 0; offsetX < 2; offsetX++)
+        {
+            uint sampleIndex = (base.y + offsetY) * EFFECT_HISTORY_RESOLUTION + base.x + offsetX;
+            result += (whitewater ? float4(gLocalWhitewaterHistory[sampleIndex]) : gFoamHistory[sampleIndex]) *
+                      (offsetX != 0 ? fraction.x : 1 - fraction.x) * (offsetY != 0 ? fraction.y : 1 - fraction.y);
+        }
     return result;
 }
+
 float2 surfaceOrbitalVelocity(float2 coordinate)
 {
-    float dt=gWater.history.x;
-    if(dt<=0 || gWater.history.y==0) return float2(0,0);
-    float2 velocity=float2(0,0);
-    for(uint band=0;band<3;band++) {
-        float2 now=sampleWater(coordinate,band,.6,false).xz;
-        float2 before=sampleWaterField(coordinate,band,.6,WATER_FIELD_PREVIOUS).xz;
-        velocity+=(now-before)/max(.001,dt);
+    float deltaTime = gWater.history.x;
+    if (deltaTime <= 0 || gWater.history.y == 0)
+        return float2(0, 0);
+    float2 velocity = float2(0, 0);
+    for (uint band = 0; band < 3; band++)
+    {
+        float2 currentDisplacement = sampleWater(coordinate, band, .6, false).xz;
+        float2 previousDisplacement = sampleWaterField(coordinate, band, .6, WATER_FIELD_PREVIOUS).xz;
+        velocity += (currentDisplacement - previousDisplacement) / max(.001, deltaTime);
     }
-    return velocity*min(1.0,6/max(.001,length(velocity)))*gWater.foamAppearance.z;
+    return velocity * min(1.0, 6 / max(.001, length(velocity))) * gWater.foamAppearance.z;
 }
+
 float surfaceRise(float2 coordinate)
 {
-    if(gWater.history.x<=0 || gWater.history.y==0) return 0;
-    float rise=0;
-    for(uint band=0;band<3;band++) {
-        rise+=sampleWater(coordinate,band,.6,false).y;
-        rise-=sampleWaterField(coordinate,band,.6,WATER_FIELD_PREVIOUS).y;
+    if (gWater.history.x <= 0 || gWater.history.y == 0)
+        return 0;
+    float rise = 0;
+    for (uint band = 0; band < 3; band++)
+    {
+        rise += sampleWater(coordinate, band, .6, false).y;
+        rise -= sampleWaterField(coordinate, band, .6, WATER_FIELD_PREVIOUS).y;
     }
-    return rise/max(.001,gWater.history.x);
+    return rise / max(.001, gWater.history.x);
 }
+
 float crestAngle(float2 coordinate)
 {
     // The larger stretch eigenvector runs along the breaking lip. Unlike a
     // height-gradient tangent, it remains defined at the crest's flat summit.
-    float2 dx=float2(0,0), dz=float2(0,0);
-    for(uint band=0;band<3;band++) {
-        dx+=sampleWater(coordinate+float2(.5,0),band,.5,false).xz-sampleWater(coordinate-float2(.5,0),band,.5,false).xz;
-        dz+=sampleWater(coordinate+float2(0,.5),band,.5,false).xz-sampleWater(coordinate-float2(0,.5),band,.5,false).xz;
+    float2 displacementDerivativeX = float2(0, 0);
+    float2 displacementDerivativeZ = float2(0, 0);
+    for (uint band = 0; band < 3; band++)
+    {
+        displacementDerivativeX += sampleWater(coordinate + float2(.5, 0), band, .5, false).xz -
+                                   sampleWater(coordinate - float2(.5, 0), band, .5, false).xz;
+        displacementDerivativeZ += sampleWater(coordinate + float2(0, .5), band, .5, false).xz -
+                                   sampleWater(coordinate - float2(0, .5), band, .5, false).xz;
     }
-    float2 axis=float2(dx.x-dz.y,dx.y+dz.x);
-    return dot(axis,axis)>.0004?.5*atan2(axis.y,axis.x):atan2(gWater.wind.x,-gWater.wind.z);
+    float2 axis = float2(displacementDerivativeX.x - displacementDerivativeZ.y,
+                         displacementDerivativeX.y + displacementDerivativeZ.x);
+    return dot(axis, axis) > .0004 ? .5 * atan2(axis.y, axis.x) : atan2(gWater.wind.x, -gWater.wind.z);
 }
+
 float4 advanceCrestSource(uint index)
 {
     // Fixed world cells, wrapped around the viewer, retain their identity
     // during pans and resizes. xy is wave coordinate, z emission, w event age.
-    float4 previous=gWater.history.y>0?gCrestHistory[index]:float4(0,0,0,0);
-    if(gWater.history.x==0) return previous;
-    float2 cell=float2(float(index%16),float(index/16));
-    float2 centreOfView=(gWater.origin.xz+gWater.eye.xz)*.5;
-    cell+=floor((centreOfView/WATER_CREST_CELL_SIZE-cell+8)/16)*16;
-    float2 anchor=(cell+.5)*WATER_CREST_CELL_SIZE;
-    bool tracking=previous.w>0 && previous.w<2.5 && distance(previous.xy,anchor)<WATER_CREST_CELL_SIZE*1.125;
-    float2 centre=tracking?previous.xy:anchor;
-    float2 direction=gWater.wind.xz/max(.1,gWater.wind.w), tangent=float2(-direction.y,direction.x);
-    float radius=tracking?.8:WATER_CREST_CELL_SIZE*.2;
-    float2 crest=centre; float best=-1, breaking=0;
-    int extent=tracking?1:2;
-    for(int y=-extent;y<=extent;y++) for(int x=-extent;x<=extent;x++) {
-        float2 at=centre+(direction*float(x)+tangent*float(y)*(tracking?.5:1.0))*radius;
-        float active=saturate(sampleWhitewater(at,.35).w);
-        float score=active-distance(at,centre)*.02;
-        if(score>best) { best=score; breaking=active; crest=at; }
-    }
+    float4 previous = gWater.history.y > 0 ? gCrestHistory[index] : float4(0, 0, 0, 0);
+    if (gWater.history.x == 0)
+        return previous;
+    float2 cell = float2(float(index % CREST_GRID_RESOLUTION), float(index / CREST_GRID_RESOLUTION));
+    float2 centreOfView = (gWater.origin.xz + gWater.eye.xz) * .5;
+    cell += floor((centreOfView / WATER_CREST_CELL_SIZE - cell + CREST_GRID_HALF_RESOLUTION) / CREST_GRID_RESOLUTION) *
+            CREST_GRID_RESOLUTION;
+    float2 anchor = (cell + .5) * WATER_CREST_CELL_SIZE;
+    bool tracking = previous.w > 0 && previous.w < CREST_TRACKING_MAX_AGE_SECONDS &&
+                    distance(previous.xy, anchor) < WATER_CREST_CELL_SIZE * 1.125;
+    float2 centre = tracking ? previous.xy : anchor;
+    float2 direction = gWater.wind.xz / max(.1, gWater.wind.w);
+    float2 tangent = float2(-direction.y, direction.x);
+    float radius = tracking ? .8 : WATER_CREST_CELL_SIZE * .2;
+    float2 crest = centre;
+    float best = -1;
+    float breaking = 0;
+    int extent = tracking ? 1 : 2;
+    for (int acrossOffset = -extent; acrossOffset <= extent; acrossOffset++)
+        for (int alongOffset = -extent; alongOffset <= extent; alongOffset++)
+        {
+            float2 at =
+                centre +
+                (direction * float(alongOffset) + tangent * float(acrossOffset) * (tracking ? .5 : 1.0)) * radius;
+            float active = saturate(sampleWhitewater(at, .35).w);
+            float score = active - distance(at, centre) * .02;
+            if (score > best)
+            {
+                best = score;
+                breaking = active;
+                crest = at;
+            }
+        }
     // Compression has already selected an unstable crest. A second velocity
     // threshold rejects breaking lips near their vertical turning point.
     // Orbital velocity controls the launch, not whether the crest exists.
-    float emission=smoothstep(.15,.65,breaking);
-    float age=breaking>.12 && (tracking || emission>.05)?(tracking?previous.w:0)+gWater.history.x:0;
-    return float4(crest,age>0?emission:0,age);
+    float emission = smoothstep(.15, .65, breaking);
+    float age = breaking > .12 && (tracking || emission > .05) ? (tracking ? previous.w : 0) + gWater.history.x : 0;
+    return float4(crest, age > 0 ? emission : 0, age);
 }
-NUM_THREADS(8,8,1)
+NUM_THREADS(8, 8, 1)
+
 void CS_MAIN(SV_DispatchThreadID(uint3) id)
 {
     INIT_MAIN;
-    uint index=id.y*256+id.x;
-    float dt=gWater.history.x, time=gWater.screen.z;
-    float2 world=gWater.foamPatch.xy+(float2(id.xy)/256-.5)*64;
+
+    // Advect the local foam and entrained-air histories.
+    uint index = id.y * EFFECT_HISTORY_RESOLUTION + id.x;
+    float deltaTime = gWater.history.x;
+    float time = gWater.screen.z;
+    float2 world = gWater.foamPatch.xy + (float2(id.xy) / EFFECT_HISTORY_RESOLUTION - .5) * EFFECT_PATCH_SIZE_METERS;
     float2 coordinate;
-    float4 surface=sampleEffectSurface(world,coordinate);
-    float2 forward=gWater.boatForward.xz, side=float2(forward.y,-forward.x);
-    float2 relative=world-gWater.boatPosition.xz;
-    float along=dot(relative,forward), across=dot(relative,side), beam=gWater.boatPosition.w, boatLength=gWater.boatForward.w;
-    float speed=length(gWater.boatVelocity.xz-gWater.current.xz);
-    float edge=1-smoothstep(25.0,31.5,max(abs(world.x-gWater.foamPatch.x),abs(world.y-gWater.foamPatch.y)));
-    float wake=exp(-across*across/max(1.0,beam*beam*.35))*smoothstep(0.0,2.0,-along-boatLength*.25)*exp(min(0.0,(along+boatLength*.5)*.055));
+    float4 surface = sampleEffectSurface(world, coordinate);
+    float2 forward = gWater.boatForward.xz;
+    float2 side = float2(forward.y, -forward.x);
+    float2 relative = world - gWater.boatPosition.xz;
+    float along = dot(relative, forward);
+    float across = dot(relative, side);
+    float beam = gWater.boatPosition.w;
+    float boatLength = gWater.boatForward.w;
+    float speed = length(gWater.boatVelocity.xz - gWater.current.xz);
+    float edge = 1 - smoothstep(25.0, 31.5, max(abs(world.x - gWater.foamPatch.x), abs(world.y - gWater.foamPatch.y)));
+    float wake = exp(-across * across / max(1.0, beam * beam * .35)) * smoothstep(0.0, 2.0, -along - boatLength * .25) *
+                 exp(min(0.0, (along + boatLength * .5) * .055));
     // Curl of a smooth scalar field supplies rotating eddies instead of a
     // sideways sine-like shove. Waves bend the eddies across their topology.
-    float3 noise=waterNoiseGradient((world-gWater.current.xz*time)*.35-surface.yz*.7);
-    float eddy=noise.x*2-1;
-    float2 curl=float2(noise.z,-noise.y);
-    curl/=max(1.0,length(curl));
-    float2 orbital=surfaceOrbitalVelocity(coordinate);
-    float outward=sign(across)*min(speed*.18,.65)*exp(-abs(along)/boatLength);
-    float2 velocity=gWater.current.xz+orbital+curl*wake*min(speed*.4,1.1)+side*outward-forward*wake*min(speed*.05,.2);
-    velocity=lerp(gWater.current.xz,velocity,edge);
-    if(dt==0 && gWater.history.y>0) velocity=effectHistory(world,false).zw;
-    float4 history=effectHistory(world-velocity*dt,false);
-    float4 whitewater=effectHistory(world-velocity*dt,true);
-    float activity=dt>0?abs(surface.x-history.y)/max(dt,.016):0;
-    float dock=(1-smoothstep(.08,.7,min(abs(world.x-8.8),abs(world.x-11.2))))*(1-smoothstep(14.8,15.5,abs(world.y)));
-    dock*=smoothstep(-.5,-.22,surface.x)*(1-smoothstep(.7,1.05,surface.x));
-    float hullAcross=abs(abs(across)-gWater.hulls.x*.5);
-    float bow=exp(-pow((along-boatLength*.42)/.65,2.0))*exp(-pow((hullAcross-gWater.hulls.y*.32)/.3,2.0));
-    float stern=exp(-pow((along+boatLength*.46)/.45,2.0))*exp(-pow(hullAcross/max(.3,gWater.hulls.y*.14),2.0));
-    float propFoam=0;
-    for(uint p=0;p<uint(gWater.hulls.z);p++)
+    float3 noise = waterNoiseGradient((world - gWater.current.xz * time) * .35 - surface.yz * .7);
+    float eddy = noise.x * 2 - 1;
+    float2 curl = float2(noise.z, -noise.y);
+    curl /= max(1.0, length(curl));
+    float2 orbital = surfaceOrbitalVelocity(coordinate);
+    float outward = sign(across) * min(speed * .18, .65) * exp(-abs(along) / boatLength);
+    float2 velocity = gWater.current.xz + orbital + curl * wake * min(speed * .4, 1.1) + side * outward -
+                      forward * wake * min(speed * .05, .2);
+    velocity = lerp(gWater.current.xz, velocity, edge);
+    if (deltaTime == 0 && gWater.history.y > 0)
+        velocity = effectHistory(world, false).zw;
+    float4 history = effectHistory(world - velocity * deltaTime, false);
+    float4 whitewater = effectHistory(world - velocity * deltaTime, true);
+    float activity = deltaTime > 0 ? abs(surface.x - history.y) / max(deltaTime, .016) : 0;
+    float dock = (1 - smoothstep(.08, .7, min(abs(world.x - 8.8), abs(world.x - 11.2)))) *
+                 (1 - smoothstep(14.8, 15.5, abs(world.y)));
+    dock *= smoothstep(-.5, -.22, surface.x) * (1 - smoothstep(.7, 1.05, surface.x));
+    float hullAcross = abs(abs(across) - gWater.hulls.x * .5);
+    float bow =
+        exp(-pow((along - boatLength * .42) / .65, 2.0)) * exp(-pow((hullAcross - gWater.hulls.y * .32) / .3, 2.0));
+    float stern =
+        exp(-pow((along + boatLength * .46) / .45, 2.0)) * exp(-pow(hullAcross / max(.3, gWater.hulls.y * .14), 2.0));
+    float propFoam = 0;
+    for (uint propellerIndex = 0; propellerIndex < uint(gWater.hulls.z); propellerIndex++)
     {
-        float4 propeller=gWater.propellers[p];
-        float2 relativeProp=world-propeller.xz+forward*sign(propeller.w)*.6;
-        float trail=dot(relativeProp,forward), lateral=dot(relativeProp,side);
-        float depth=max(0.0,surface.x-propeller.y);
-        propFoam+=exp(-trail*trail/.8-lateral*lateral/.2-depth)*propeller.w*propeller.w*.6;
+        float4 propeller = gWater.propellers[propellerIndex];
+        float2 relativeProp = world - propeller.xz + forward * sign(propeller.w) * .6;
+        float trail = dot(relativeProp, forward);
+        float lateral = dot(relativeProp, side);
+        float depth = max(0.0, surface.x - propeller.y);
+        propFoam += exp(-trail * trail / .8 - lateral * lateral / .2 - depth) * propeller.w * propeller.w * .6;
     }
-    float4 localWave=localWater(world);
-    float breaker=localWave.w*smoothstep(0.0,.08,localWave.x);
-    float source=(dock*min(activity*.3,1.5)+(bow+stern*.4)*saturate((speed-.5)*.55)+propFoam+breaker*.35)*(.65+.35*eddy);
-    float diffusion=min(.24,gWater.foamSettings.y*dt/.0625);
-    float4 north=effectHistory(world-velocity*dt+float2(0,.25),false);
-    float4 south=effectHistory(world-velocity*dt-float2(0,.25),false);
-    float4 east=effectHistory(world-velocity*dt+float2(.25,0),false);
-    float4 west=effectHistory(world-velocity*dt-float2(.25,0),false);
-    history.x+=(north.x+south.x+east.x+west.x-4*history.x)*diffusion;
-    float4 adjacent=effectHistory(world-velocity*dt+float2(0,.25),true)+effectHistory(world-velocity*dt-float2(0,.25),true);
-    adjacent+=effectHistory(world-velocity*dt+float2(.25,0),true)+effectHistory(world-velocity*dt-float2(.25,0),true);
-    whitewater+=(adjacent-4*whitewater)*diffusion;
+    float4 localWave = localWater(world);
+    float breaker = localWave.w * smoothstep(0.0, .08, localWave.x);
+    float source = (dock * min(activity * .3, 1.5) + (bow + stern * .4) * saturate((speed - .5) * .55) + propFoam +
+                    breaker * .35) *
+                   (.65 + .35 * eddy);
+    float diffusion = min(.24, gWater.foamSettings.y * deltaTime / .0625);
+    float4 north = effectHistory(world - velocity * deltaTime + float2(0, .25), false);
+    float4 south = effectHistory(world - velocity * deltaTime - float2(0, .25), false);
+    float4 east = effectHistory(world - velocity * deltaTime + float2(.25, 0), false);
+    float4 west = effectHistory(world - velocity * deltaTime - float2(.25, 0), false);
+    history.x += (north.x + south.x + east.x + west.x - 4 * history.x) * diffusion;
+    float4 adjacent = effectHistory(world - velocity * deltaTime + float2(0, .25), true) +
+                      effectHistory(world - velocity * deltaTime - float2(0, .25), true);
+    adjacent += effectHistory(world - velocity * deltaTime + float2(.25, 0), true) +
+                effectHistory(world - velocity * deltaTime - float2(.25, 0), true);
+    whitewater += (adjacent - 4 * whitewater) * diffusion;
     // Advect concentration: converging surface flow gathers remnants, while
     // expansion thins them. Reuse velocity samples from the history stencil.
-    float divergence=clamp((east.z-west.z+north.w-south.w)/.5,-2.0,2.0);
-    float erosion=lerp(1.0,.35+2.5*smoothstep(.3,.75,noise.x),gWater.foamAppearance.y);
-    float decay=gWater.foamSettings.x*(1+history.x)*erosion;
-    float expansion=exp(-dt*divergence);
-    history.x*=expansion; whitewater.xyz*=expansion;
+    float divergence = clamp((east.z - west.z + north.w - south.w) / .5, -2.0, 2.0);
+    float erosion = lerp(1.0, .35 + 2.5 * smoothstep(.3, .75, noise.x), gWater.foamAppearance.y);
+    float decay = gWater.foamSettings.x * (1 + history.x) * erosion;
+    float expansion = exp(-deltaTime * divergence);
+    history.x *= expansion;
+    whitewater.xyz *= expansion;
     float foam;
-    whitewater=evolveWhitewater(history.x,whitewater,source,activity,dt,decay,6,foam);
+    whitewater = evolveWhitewater(history.x, whitewater, source, activity, deltaTime, decay, 6, foam);
     // Pausing must preserve density. Fade sources and advected remnants in
     // simulation time, not once for every redraw of a diagnostic view.
-    float boundary=exp(-dt*(1-edge)*8);
-    foam*=boundary; whitewater*=boundary;
-    gFoamOutput[index]=float4(foam,surface.x,velocity);
-    gLocalWhitewaterOutput[index]=min16float4(whitewater);
-    if(index<256) gCrestOutput[index]=advanceCrestSource(index);
-    uint capacity=uint(gWater.quality.x);
-    if(index<4096)
+    float boundary = exp(-deltaTime * (1 - edge) * 8);
+    foam *= boundary;
+    whitewater *= boundary;
+    gFoamOutput[index] = float4(foam, surface.x, velocity);
+    gLocalWhitewaterOutput[index] = min16float4(whitewater);
+    if (index < EFFECT_CREST_SOURCE_CAPACITY)
+        gCrestOutput[index] = advanceCrestSource(index);
+
+    // Advance existing particles and emit replacements into vacant slots.
+    uint capacity = uint(gWater.quality.x);
+    if (index < EFFECT_PARTICLE_POOL_CAPACITY)
     {
-        bool hullSource=index<capacity*3/8, foamSource=hullSource && index>=capacity/4;
-        bool rain=index>=capacity*7/8;
-        uint slotsPerCrest=max(1u,capacity/512u);
-        bool crestFront=!hullSource && !rain && slotsPerCrest>1 && index%slotsPerCrest==0;
-        float4 crest=gWater.history.y>0 && !hullSource && !rain?
-            gCrestHistory[((index/slotsPerCrest)*73)&255u]:float4(0,0,0,0);
-        float4 position=float4(0,0,0,0), velocityLife=float4(0,0,0,0), metadata=float4(0,0,0,0);
-        if(gWater.history.y>0)
+        bool hullSource = index < capacity * 3 / 8;
+        bool foamSource = hullSource && index >= capacity / 4;
+        bool rain = index >= capacity * 7 / 8;
+        uint slotsPerCrest = max(1u, capacity / 512u);
+        bool crestFront = !hullSource && !rain && slotsPerCrest > 1 && index % slotsPerCrest == 0;
+        float4 crest = gWater.history.y > 0 && !hullSource && !rain
+                           ? gCrestHistory[((index / slotsPerCrest) * 73) & 255u]
+                           : float4(0, 0, 0, 0);
+        float4 position = float4(0, 0, 0, 0);
+        float4 velocityLife = float4(0, 0, 0, 0);
+        float4 metadata = float4(0, 0, 0, 0);
+        if (gWater.history.y > 0)
         {
-            position=gSprayHistory[index*3]; velocityLife=gSprayHistory[index*3+1]; metadata=gSprayHistory[index*3+2];
+            position = gSprayHistory[index * 3];
+            velocityLife = gSprayHistory[index * 3 + 1];
+            metadata = gSprayHistory[index * 3 + 2];
         }
-        if(index>=capacity) velocityLife.w=0;
-        if(velocityLife.w>0)
+        if (index >= capacity)
+            velocityLife.w = 0;
+        if (velocityLife.w > 0)
         {
-            position.w+=dt;
-            if(metadata.x==WATER_FROTH)
+            position.w += deltaTime;
+            if (metadata.x == WATER_FROTH)
             {
                 // Froth is a material parcel on the wave. Store that coordinate
                 // in the otherwise unused horizontal velocity components.
-                velocityLife.xz+=gWater.current.xz*dt;
+                velocityLife.xz += gWater.current.xz * deltaTime;
                 // One slot represents the continuously replenished breaking
                 // lip. When its tracked source ends, it becomes a remnant and
                 // drifts with the material instead of following the next crest.
-                if(dt>0 && crestFront && crest.z>.1 && distance(velocityLife.xz,crest.xy)<2) {
-                    velocityLife.xz=crest.xy;
-                    position.w=min(position.w,.25);
+                if (deltaTime > 0 && crestFront && crest.z > .1 && distance(velocityLife.xz, crest.xy) < 2)
+                {
+                    velocityLife.xz = crest.xy;
+                    position.w = min(position.w, .25);
                 }
                 // Raised churn needs an active breaking lip beneath it. Once
                 // that source moves on, settle into the existing surface foam.
-                float breaking=distance(velocityLife.xz,crest.xy)<2?crest.z:0;
-                metadata.w=lerp(metadata.w,breaking,1-exp(-dt*10));
+                float breaking = distance(velocityLife.xz, crest.xy) < 2 ? crest.z : 0;
+                metadata.w = lerp(metadata.w, breaking, 1 - exp(-deltaTime * 10));
                 float2 world;
-                float4 water=surfaceAtCoordinate(velocityLife.xz,.35,world);
-                position.xyz=float3(world.x,water.x+.035,world.y);
+                float4 water = surfaceAtCoordinate(velocityLife.xz, EFFECT_CREST_SAMPLE_FOOTPRINT_METERS, world);
+                position.xyz = float3(world.x, water.x + EFFECT_SURFACE_OFFSET_METERS, world.y);
             }
-            else if(metadata.x==WATER_FOAM)
+            else if (metadata.x == WATER_FOAM)
             {
-                float4 flow=effectHistory(position.xz,false);
+                float4 flow = effectHistory(position.xz, false);
                 // The local field already carries orbital flow. Outside it,
                 // use the same wave velocity so distant froth follows the sea.
-                float boundary=smoothstep(25.0,31.5,max(abs(position.x-gWater.foamPatch.x),abs(position.z-gWater.foamPatch.y)));
-                if(boundary>0) {
+                float boundary = smoothstep(
+                    25.0, 31.5, max(abs(position.x - gWater.foamPatch.x), abs(position.z - gWater.foamPatch.y)));
+                if (boundary > 0)
+                {
                     float2 coordinate;
-                    sampleEffectSurface(position.xz,coordinate);
-                    flow.zw+=surfaceOrbitalVelocity(coordinate)*boundary;
+                    sampleEffectSurface(position.xz, coordinate);
+                    flow.zw += surfaceOrbitalVelocity(coordinate) * boundary;
                 }
-                position.xz+=(flow.zw+gWater.wind.xz*.006)*dt;
+                position.xz += (flow.zw + gWater.wind.xz * .006) * deltaTime;
                 float2 coordinate;
-                float4 water=sampleEffectSurface(position.xz,coordinate);
-                position.y=water.x+.035; velocityLife.xz=coordinate;
+                float4 water = sampleEffectSurface(position.xz, coordinate);
+                position.y = water.x + EFFECT_SURFACE_OFFSET_METERS;
+                velocityLife.xz = coordinate;
             }
             else
             {
-                bool mist=metadata.x==WATER_MIST;
-                velocityLife.xyz+=(gWater.wind.xyz*(mist?.32:.16)-velocityLife.xyz)*dt*(mist?1.2:.45);
-                velocityLife.y-=(mist?1.2:9.81)*dt; position.xyz+=velocityLife.xyz*dt;
+                bool mist = metadata.x == WATER_MIST;
+                velocityLife.xyz +=
+                    (gWater.wind.xyz * (mist ? .32 : .16) - velocityLife.xyz) * deltaTime * (mist ? 1.2 : .45);
+                velocityLife.y -= (mist ? 1.2 : EFFECT_GRAVITY_METERS_PER_SECOND_SQUARED) * deltaTime;
+                position.xyz += velocityLife.xyz * deltaTime;
                 float2 landingCoordinate;
-                float height=sampleEffectSurface(position.xz,landingCoordinate).x;
-                if(position.y<height)
+                float height = sampleEffectSurface(position.xz, landingCoordinate).x;
+                if (position.y < height)
                 {
-                    position.y=height+.035; position.w=0;
+                    position.y = height + EFFECT_SURFACE_OFFSET_METERS;
+                    position.w = 0;
                     // Brief landing splashes recycle the airborne slots. Long
                     // surface rafts have their own emitters, so they cannot
                     // occupy every spray slot and turn emission into pulses.
                     // Rain does not entrain enough air to leave visible foam
                     // rafts. Only the landing spray from a breaker or hull does.
-                    velocityLife.w=mist || metadata.x==WATER_RAIN?0:.35+metadata.w*.7;
-                    metadata.y=min(.2,max(metadata.y*1.8,.06)); metadata.x=WATER_FOAM;
-                    velocityLife.xz=landingCoordinate;
+                    velocityLife.w = mist || metadata.x == WATER_RAIN ? 0 : .35 + metadata.w * .7;
+                    metadata.y = min(.2, max(metadata.y * 1.8, .06));
+                    metadata.x = WATER_FOAM;
+                    velocityLife.xz = landingCoordinate;
                 }
             }
-            if(position.w>=velocityLife.w || distance(position.xz,gWater.eye.xz)>200) velocityLife.w=0;
+            if (position.w >= velocityLife.w ||
+                distance(position.xz, gWater.eye.xz) > EFFECT_PARTICLE_CULL_DISTANCE_METERS)
+                velocityLife.w = 0;
         }
-        if(index<capacity && velocityLife.w==0 && dt>0)
+        if (index < capacity && velocityLife.w == 0 && deltaTime > 0)
         {
-            float2 key=float2(float(index),gWater.history.z);
-            float2 random=float2(hashWater(key),hashWater(key+17.3));
-            float2 candidate=gWater.patch.xz+(random-.5)*48;
-            bool visible=true;
-            float crestEmission=0;
-            float2 crestCoordinate=candidate;
-            if(!hullSource && !rain) {
+            float2 key = float2(float(index), gWater.history.z);
+            float2 random = float2(hashWater(key), hashWater(key + 17.3));
+            float2 candidate = gWater.patch.xz + (random - .5) * 48;
+            bool visible = true;
+            float crestEmission = 0;
+            float2 crestCoordinate = candidate;
+            if (!hullSource && !rain)
+            {
                 // Cover all 256 sources at every quality level. Read the
                 // previous step so threads never race the source update.
-                crestEmission=crest.z;
-                float2 waveDirection=gWater.wind.xz/max(.1,gWater.wind.w);
-                float2 tangent=float2(-waveDirection.y,waveDirection.x);
-                crestCoordinate=crest.xy+tangent*(random.y-.5)*(crestFront?0:1.5);
+                crestEmission = crest.z;
+                float2 waveDirection = gWater.wind.xz / max(.1, gWater.wind.w);
+                float2 tangent = float2(-waveDirection.y, waveDirection.x);
+                crestCoordinate = crest.xy + tangent * (random.y - .5) * (crestFront ? 0 : 1.5);
             }
-            float travelSign=dot(gWater.boatVelocity.xz-gWater.current.xz,forward)<0?-1.0:1.0;
-            float spraySide=frac(random.y*2)>.5?1.0:-1.0;
-            if(hullSource) {
-                float hullSide=(random.y>.5?1.0:-1.0)*gWater.hulls.x*.5;
-                float along=foamSource?-boatLength*(.42+random.x*.15):boatLength*.42+(random.x-.5)*.9;
-                float lateral=foamSource?(hashWater(key+31.1)*2-1)*gWater.hulls.y*.2:spraySide*gWater.hulls.y*.32;
-                candidate=gWater.boatPosition.xz+forward*along*travelSign+side*(hullSide+lateral);
+            float travelSign = dot(gWater.boatVelocity.xz - gWater.current.xz, forward) < 0 ? -1.0 : 1.0;
+            float spraySide = frac(random.y * 2) > .5 ? 1.0 : -1.0;
+            if (hullSource)
+            {
+                float hullSide = (random.y > .5 ? 1.0 : -1.0) * gWater.hulls.x * .5;
+                float along =
+                    foamSource ? -boatLength * (.42 + random.x * .15) : boatLength * .42 + (random.x - .5) * .9;
+                float lateral = foamSource ? (hashWater(key + 31.1) * 2 - 1) * gWater.hulls.y * .2
+                                           : spraySide * gWater.hulls.y * .32;
+                candidate = gWater.boatPosition.xz + forward * along * travelSign + side * (hullSide + lateral);
             }
             float4 water;
-            if(!hullSource && !rain) water=surfaceAtCoordinate(crestCoordinate,.35,candidate);
-            else water=sampleEffectSurface(candidate,crestCoordinate);
-            if(!hullSource && !rain) {
+            if (!hullSource && !rain)
+                water = surfaceAtCoordinate(crestCoordinate, EFFECT_CREST_SAMPLE_FOOTPRINT_METERS, candidate);
+            else
+                water = sampleEffectSurface(candidate, crestCoordinate);
+            if (!hullSource && !rain)
+            {
                 // Cull the displaced crest. A sea-level proxy rejected nearby
                 // breakers below a low camera even while their lips were visible.
-                float4 clip=mul(gWater.viewProjection,float4(candidate.x,water.x,candidate.y,1));
-                visible=clip.w>.1 && all(abs(clip.xy)<clip.ww*1.1) && distance(candidate,gWater.eye.xz)<160;
+                float4 clip = mul(gWater.viewProjection, float4(candidate.x, water.x, candidate.y, 1));
+                visible = clip.w > .1 && all(abs(clip.xy) < clip.ww * 1.1) && distance(candidate, gWater.eye.xz) < 160;
             }
-            float breaking=saturate(sampleWhitewater(crestCoordinate,.35).w);
-            float chance=hullSource?saturate((speed-.6)*.6):crestEmission*smoothstep(.1,.4,breaking);
-            if(rain) chance=gWater.weather.y*.7;
-            if(!visible) chance=0;
-            float rate=foamSource?.15:crestFront?32.0:8.0;
-            if(hashWater(key+49.7)<1-exp(-chance*dt*rate*gWater.foamSettings.w))
+            float breaking = saturate(sampleWhitewater(crestCoordinate, EFFECT_CREST_SAMPLE_FOOTPRINT_METERS).w);
+            float chance = hullSource ? saturate((speed - .6) * .6) : crestEmission * smoothstep(.1, .4, breaking);
+            if (rain)
+                chance = gWater.weather.y * .7;
+            if (!visible)
+                chance = 0;
+            float rate = foamSource ? .15 : crestFront ? 32.0 : 8.0;
+            if (hashWater(key + 49.7) < 1 - exp(-chance * deltaTime * rate * gWater.foamSettings.w))
             {
-                position=float4(candidate.x,water.x+.12,candidate.y,0);
-                float2 crestVelocity=gWater.current.xz;
-                if(!hullSource && !rain) crestVelocity+=surfaceOrbitalVelocity(crestCoordinate);
-                float rise=max(0.0,surfaceRise(crestCoordinate));
-                float launchSpeed=sqrt(rise*rise+.25*dot(crestVelocity-gWater.current.xz,crestVelocity-gWater.current.xz));
-                float lift=hullSource?.8+random.x*1.6+min(speed*.3,1.2):.3+min(3.0,launchSpeed)*(.45+random.x*.35);
-                velocityLife=float4(crestVelocity.x+gWater.wind.x*.14,lift,crestVelocity.y+gWater.wind.z*.14,2.4);
-                float kind=frac(random.x*7);
-                bool surfaceFoam=foamSource || crestFront || (!hullSource && !rain && kind<.22);
-                bool mist=!surfaceFoam && !rain && kind>.78 && (hullSource?speed>2:gWater.wind.w>9);
-                bool sheet=kind>.4 && !mist;
-                float angle=hullSource || rain?atan2(side.y,side.x):crestAngle(crestCoordinate);
-                metadata=float4(mist?WATER_MIST:sheet?WATER_SHEET:WATER_DROPLET,
-                    mist?.08+random.y*.1:sheet?.12+random.y*.12:.007+random.y*.012,angle,random.x);
-                if(!hullSource && !rain) {
+                position = float4(candidate.x, water.x + .12, candidate.y, 0);
+                float2 crestVelocity = gWater.current.xz;
+                if (!hullSource && !rain)
+                    crestVelocity += surfaceOrbitalVelocity(crestCoordinate);
+                float rise = max(0.0, surfaceRise(crestCoordinate));
+                float launchSpeed =
+                    sqrt(rise * rise + .25 * dot(crestVelocity - gWater.current.xz, crestVelocity - gWater.current.xz));
+                float lift = hullSource ? .8 + random.x * 1.6 + min(speed * .3, 1.2)
+                                        : .3 + min(3.0, launchSpeed) * (.45 + random.x * .35);
+                velocityLife =
+                    float4(crestVelocity.x + gWater.wind.x * .14, lift, crestVelocity.y + gWater.wind.z * .14, 2.4);
+                float kind = frac(random.x * 7);
+                bool surfaceFoam = foamSource || crestFront || (!hullSource && !rain && kind < .22);
+                bool mist = !surfaceFoam && !rain && kind > .78 && (hullSource ? speed > 2 : gWater.wind.w > 9);
+                bool sheet = kind > .4 && !mist;
+                float angle = hullSource || rain ? atan2(side.y, side.x) : crestAngle(crestCoordinate);
+                metadata = float4(mist    ? WATER_MIST
+                                  : sheet ? WATER_SHEET
+                                          : WATER_DROPLET,
+                                  mist    ? .08 + random.y * .1
+                                  : sheet ? .12 + random.y * .12
+                                          : .007 + random.y * .012,
+                                  angle, random.x);
+                if (!hullSource && !rain)
+                {
                     // Crest sheets span a breaking lip; droplets stay small.
                     // Keep boat spray separately scaled for manoeuvring speeds.
-                    if(sheet) metadata.y=.30+random.y*.25;
-                    if(mist) metadata.y=.35+random.y*.30;
-                    metadata.y*=1+.6*smoothstep(8.0,22.0,gWater.wind.w);
+                    if (sheet)
+                        metadata.y = .30 + random.y * .25;
+                    if (mist)
+                        metadata.y = .35 + random.y * .30;
+                    metadata.y *= 1 + .6 * smoothstep(8.0, 22.0, gWater.wind.w);
                 }
-                if(hullSource) velocityLife.xz+=gWater.boatVelocity.xz*.45+side*spraySide*min(speed*.6,2.2);
-                if(mist) { velocityLife.y*=.5; velocityLife.w=.8+random.x*.6; }
-                if(surfaceFoam) {
-                    metadata.x=hullSource?WATER_FOAM:WATER_FROTH;
-                    if(!hullSource) metadata.w=crestEmission;
-                    metadata.y=hullSource?.18+random.y*.26:crestFront?.5+random.y*.2:.24+random.y*.22;
+                if (hullSource)
+                    velocityLife.xz += gWater.boatVelocity.xz * .45 + side * spraySide * min(speed * .6, 2.2);
+                if (mist)
+                {
+                    velocityLife.y *= .5;
+                    velocityLife.w = .8 + random.x * .6;
+                }
+                if (surfaceFoam)
+                {
+                    metadata.x = hullSource ? WATER_FOAM : WATER_FROTH;
+                    if (!hullSource)
+                        metadata.w = crestEmission;
+                    metadata.y = hullSource   ? .18 + random.y * .26
+                                 : crestFront ? .5 + random.y * .2
+                                              : .24 + random.y * .22;
                     // A weak breaker sheds a small clump, not a storm-sized
                     // crown. The launch uses this same measured wave velocity.
-                    if(!hullSource) metadata.y*=clamp(launchSpeed*.4,.08,1.0);
-                    position.y=water.x+.035;
-                    velocityLife=float4(crestCoordinate.x,0,crestCoordinate.y,hullSource?2.5+random.x*2:1.2+random.x);
+                    if (!hullSource)
+                        metadata.y *= clamp(launchSpeed * .4, .08, 1.0);
+                    position.y = water.x + EFFECT_SURFACE_OFFSET_METERS;
+                    velocityLife = float4(crestCoordinate.x, 0, crestCoordinate.y,
+                                          hullSource ? 2.5 + random.x * 2 : 1.2 + random.x);
                 }
-                if(rain) { position.y+=6+random.x*10; velocityLife.y=-13; metadata.x=WATER_RAIN; metadata.y=.014; }
+                if (rain)
+                {
+                    position.y += 6 + random.x * 10;
+                    velocityLife.y = -13;
+                    metadata.x = WATER_RAIN;
+                    metadata.y = .014;
+                }
             }
         }
-        gSprayOutput[index*3]=position; gSprayOutput[index*3+1]=velocityLife; gSprayOutput[index*3+2]=metadata;
+        gSprayOutput[index * 3] = position;
+        gSprayOutput[index * 3 + 1] = velocityLife;
+        gSprayOutput[index * 3 + 2] = metadata;
     }
     RETURN();
 }

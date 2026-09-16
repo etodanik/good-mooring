@@ -23,6 +23,31 @@
  */
 
 #include "../../Resources/ResourceLoader/ThirdParty/OpenSource/tinyimageformat/tinyimageformat_query.h"
+#include <stdio.h>
+
+// Nuklear's default conversion truncates binary float error (0.35 becomes 0.349).
+// Round to its displayed precision, then remove redundant decimal zeroes.
+#define NK_MAX_NUMBER_BUFFER 64
+static char* uiFormatNumber(char* buffer, double value)
+{
+    snprintf(buffer, NK_MAX_NUMBER_BUFFER, "%.3f", value);
+    char* end = buffer;
+    bool decimal = false;
+    while (*end)
+    {
+        decimal |= *end == '.';
+        ++end;
+    }
+    if (decimal)
+    {
+        while (end > buffer && end[-1] == '0')
+            *--end = 0;
+        if (end > buffer && end[-1] == '.')
+            *--end = 0;
+    }
+    return buffer;
+}
+#define NK_DTOA uiFormatNumber
 
 #ifdef FORGE_UI_USE_32BIT_INDEXES
 #define NK_UINT_DRAW_INDEX
@@ -994,6 +1019,28 @@ TFUIWidgetInteraction uiDebugTexture(const TFTexture* handle, float2 textureDisp
     return result;
 }
 
+bool uiDebugTexturePick(const TFTexture* handle, float2* pickedUV, const float2* selectedUV)
+{
+    struct nk_context* context = getContext();
+    struct nk_rect     bounds = nk_widget_bounds(context);
+    bool               clicked = !(context->current->flags & NK_WINDOW_ROM) && nk_widget_is_mouse_clicked(context, NK_BUTTON_LEFT);
+    if (clicked && pickedUV && bounds.w > 0 && bounds.h > 0)
+        *pickedUV = { (context->input.mouse.pos.x - bounds.x) / bounds.w, (context->input.mouse.pos.y - bounds.y) / bounds.h };
+    uiDebugTexture(handle, { bounds.w, bounds.h });
+    if (selectedUV)
+    {
+        const float               horizontal = bounds.x + (*selectedUV)[0] * bounds.w;
+        const float               vertical = bounds.y + (*selectedUV)[1] * bounds.h;
+        const float               radius = 5 * pUserInterface->mDpiScale[0];
+        struct nk_command_buffer* canvas = nk_window_get_canvas(context);
+        nk_stroke_line(canvas, horizontal - radius, vertical, horizontal + radius, vertical, 3, nk_rgb(0, 0, 0));
+        nk_stroke_line(canvas, horizontal, vertical - radius, horizontal, vertical + radius, 3, nk_rgb(0, 0, 0));
+        nk_stroke_line(canvas, horizontal - radius, vertical, horizontal + radius, vertical, 1, nk_rgb(255, 255, 255));
+        nk_stroke_line(canvas, horizontal, vertical - radius, horizontal, vertical + radius, 1, nk_rgb(255, 255, 255));
+    }
+    return clicked;
+}
+
 TFUIWidgetInteraction uiLabel(const char* label, TFUIAlignmentText alignment)
 {
     TFUIWidgetInteraction result;
@@ -1128,6 +1175,21 @@ TFUIWidgetInteraction uiButton(const char* label)
     result.pressed = nk_button_label(getContext(), label);
     result.id = getWidgetId(updateLastWidget(label, TF_WIDGET_TYPE_BUTTON));
     EndGamepadWidget();
+    return result;
+}
+
+TFUIWidgetInteraction uiButtonColored(const char* label, float4 background)
+{
+    struct nk_style_button*      style = &getContext()->style.button;
+    const struct nk_style_button saved = *style;
+    const struct nk_color        color = float4ToNkColor(background);
+    style->normal = nk_style_item_color(color);
+    style->hover =
+        nk_style_item_color(nk_rgb((nk_byte)minf(255, color.r + 20), (nk_byte)minf(255, color.g + 20), (nk_byte)minf(255, color.b + 20)));
+    style->active = nk_style_item_color(color);
+    style->text_normal = style->text_hover = style->text_active = nk_rgb(245, 247, 250);
+    TFUIWidgetInteraction result = uiButton(label);
+    *style = saved;
     return result;
 }
 
@@ -1313,6 +1375,22 @@ TFUIWidgetInteraction uiPropertyInt(int32_t* val, int32_t min, int32_t max, int3
 
     result.changed = (prevVal - *val) != 0;
     result.id = getWidgetId(updateLastWidget("propertyint", TF_WIDGET_TYPE_PROPERTY_INT));
+    EndGamepadWidget();
+    return result;
+}
+
+TFUIWidgetInteraction uiPropertyFloat(float* value, float minimum, float maximum, float step)
+{
+    TFUIWidgetInteraction result;
+    struct nk_context*    context = getContext();
+    saveLastWidgetOffset();
+    result.type = TF_WIDGET_INTERACTION_CHANGED;
+    const float previous = *value;
+    *value = clampf(*value + step * UnpackWidgetHorizontalActionForSliderf(BeginGamepadWidget(0, 0, false, true), minimum, maximum, step),
+                    minimum, maximum);
+    nk_property_float(context, "#", minimum, value, maximum, step, step);
+    result.changed = previous != *value;
+    result.id = getWidgetId(updateLastWidget("property_float", TF_WIDGET_TYPE_SLIDER_FLOAT));
     EndGamepadWidget();
     return result;
 }
@@ -4950,7 +5028,7 @@ float uiGetRoundScreenSize() { return pUserInterface->mRoundScreenSize; }
 
 void uiSetRoundScreenSize(float roundScreenSize) { pUserInterface->mRoundScreenSize = roundScreenSize; }
 
-TFUIWindowInteraction uiBeginWidgetWindow(const TFUIWindowDesc* pDesc)
+TFUIWindowInteraction uiBeginWidgetWindow(const TFUIWindowDesc* pDesc, bool* open)
 {
     struct nk_context*    ctx = getContext();
     TFUIWindowInteraction result;
@@ -4975,6 +5053,13 @@ TFUIWindowInteraction uiBeginWidgetWindow(const TFUIWindowDesc* pDesc)
     }
 
     struct nk_window* existingWindow = (struct nk_window*)uiFindWindowByTitle(pDesc->pWindowTitle);
+
+    if (open)
+    {
+        flags |= TF_UI_WINDOW_CLOSABLE;
+        if (*open && existingWindow)
+            existingWindow->flags &= ~(nk_flags)(NK_WINDOW_HIDDEN | NK_WINDOW_CLOSED);
+    }
 
     if (pUserInterface->mEnabledSWL)
     {
@@ -5103,6 +5188,14 @@ TFUIWindowInteraction uiBeginWidgetWindow(const TFUIWindowDesc* pDesc)
 
     result.fillable = nk_begin(ctx, pDesc->pWindowTitle, nk_rect(windowsPos.x, windowsPos.y, windowSize.x, windowSize.y), flags);
     struct nk_window* win = ctx->current;
+
+    if (open && ((win->layout ? win->layout->flags : win->flags) & (NK_WINDOW_HIDDEN | NK_WINDOW_CLOSED)))
+    {
+        *open = false;
+        // Closing can expose another title bar during this frame. Consume the
+        // click so a window underneath cannot handle the same close action.
+        ctx->input.mouse.buttons[NK_BUTTON_LEFT].clicked = 0;
+    }
 
     if (result.fillable)
     {
@@ -5582,6 +5675,30 @@ vec2 uiGetWindowSize()
 {
     const struct nk_window* wnd = (const struct nk_window*)uiGetCurrentWindow();
     return vec2(wnd->bounds.w, wnd->bounds.h);
+}
+
+vec2 uiGetWindowPos()
+{
+    const struct nk_window* window = getContext()->current;
+    return vec2(window->bounds.x, window->bounds.y);
+}
+
+void uiSetWindowPos(vec2 position)
+{
+    struct nk_context* context = getContext();
+    nk_window_set_position(context, context->current->name_string, nk_vec2(position.x, position.y));
+}
+
+void uiSetWindowSize(vec2 size)
+{
+    struct nk_context* context = getContext();
+    nk_window_set_size(context, context->current->name_string, nk_vec2(size.x, size.y));
+}
+
+void uiSetWindowFocus(const char* title)
+{
+    struct nk_context* context = getContext();
+    nk_window_set_focus(context, title ? title : context->current->name_string);
 }
 
 void uiPushWindowBackgroundColor(float4 color)
@@ -7534,7 +7651,11 @@ FORGE_API bool uiIsRenderingEnabled()
 FORGE_API void uiToggleRendering(bool enabled)
 {
 #ifdef ENABLE_FORGE_UI
+    if (pUserInterface->mEnableRendering != enabled)
+        pUserInterface->mForceUpdate = true;
     pUserInterface->mEnableRendering = enabled;
+    if (!enabled)
+        clearUserInterface();
 #else
     (void)enabled;
 #endif
@@ -7563,6 +7684,16 @@ FORGE_API bool uiIsInitialized()
 {
 #ifdef ENABLE_FORGE_UI
     return pUserInterface->mInitialized;
+#endif
+}
+
+FORGE_API bool uiWantsTextInput()
+{
+#ifdef ENABLE_FORGE_UI
+    const struct nk_window* active = getContext()->active;
+    return active && !(active->flags & (NK_WINDOW_HIDDEN | NK_WINDOW_CLOSED)) && (active->edit.active || active->property.active);
+#else
+    return false;
 #endif
 }
 

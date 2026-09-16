@@ -47,6 +47,7 @@ If an error occurs on the host:
 */
 
 #include "ReloadClient.h"
+#if defined(ENABLE_FORGE_RELOAD_SHADER)
 
 #include <string.h>
 
@@ -136,6 +137,7 @@ typedef struct ReloadClient
     tfrg_atomic32_t      mIsReloading;
     uint16_t             mPort;
     bool                 mDidInit;
+    char                 mError[8192];
     bstring              mHost;
     bstring              mIntermediateDir;
     bstring              mNotification;
@@ -504,6 +506,7 @@ static void requestRecompileThreadFunc(void* userdata)
     if (serverDidReturnError)
     {
         LOGF(eERROR, "%s", (const char*)data);
+        snprintf(gClient.mError, sizeof(gClient.mError), "%s", (const char*)data);
     }
     else
     {
@@ -575,8 +578,8 @@ void platformExitReloadClient()
         return;
     }
 
-    acquireMutex(&gClient.mLock);
-    releaseMutex(&gClient.mLock);
+    if (gClient.mThread)
+        joinThread(gClient.mThread);
 
     exitMutex(&gClient.mLock);
 
@@ -594,6 +597,8 @@ void platformExitReloadClient()
 
 void platformRequestReload()
 {
+    if (!gClient.mDidInit)
+        return;
     if (tfrg_atomic32_cas_relaxed(&gClient.mIsReloading, 0, 1) == 1)
     {
         // Someone has already requested a recompile so we don't need to
@@ -601,6 +606,7 @@ void platformRequestReload()
     }
 
     gClient.mIsButtonActiveState = false;
+    snprintf(gClient.mError, sizeof(gClient.mError), "Reload failed. Check the application log for connection errors.");
     bassigncstr(&gClient.mNotification, "Connecting to reload server...");
 
     TFThreadDesc desc = { requestRecompileThreadFunc, nullptr, "ShaderRecompile" };
@@ -684,6 +690,8 @@ void platformUpdateReloadClientUI(void)
 // and exit the application when testing (by returning true).
 void platformUpdateReloadClient(void)
 {
+    if (!gClient.mDidInit)
+        return;
     // TODO: Should we re-enable `Reload shaders` button after X time has passed, even if the thread might still be running?
     // This could be problematic but might be a good fallback for the recompile thread dying for strange reasons.
     if (tfrg_atomic32_store_release(&gClient.mShouldReenableButton, 0) == 1)
@@ -697,6 +705,7 @@ void platformUpdateReloadClient(void)
 
         if (tfrg_atomic32_load_relaxed(&gClient.mDidReload))
         {
+            gClient.mError[0] = 0;
             bassigncstr(&gClient.mNotification, "Notification: None");
         }
         else
@@ -726,6 +735,7 @@ void platformSetupReloadClientUI(const TFUIWindowDesc* pDesc)
 
     gClient.mUiDesc = *pDesc;
 
+#if defined(ENABLE_FORGE_SCRIPTING)
     TFLuaWidgetFunctionDesc uiFuncDesc;
     uiFuncDesc.pLabel = gClient.pReloadShaderButtonLabel;
     uiFuncDesc.mType = TF_LUA_WIDGET_FUNCTION_ON_EDITED;
@@ -738,4 +748,27 @@ void platformSetupReloadClientUI(const TFUIWindowDesc* pDesc)
     uiNotificationDesc.mWidgetType = TF_WIDGET_TYPE_DYNAMIC_TEXT;
     uiNotificationDesc.pText = &gClient.mNotification;
     luaRegisterWidgetVariable(&uiNotificationDesc);
+#endif
 }
+
+bool platformSetReloadPort(uint16_t port)
+{
+    if (!gClient.mDidInit || tfrg_atomic32_load_relaxed(&gClient.mIsReloading))
+        return false;
+    if (!socketAddrFromHostPort(&gClient.mAddr, "127.0.0.1", port))
+        return false;
+    gClient.mPort = port;
+    return true;
+}
+
+int platformReloadStatus(char* message, size_t capacity)
+{
+    const bool busy = gClient.mDidInit && tfrg_atomic32_load_relaxed(&gClient.mIsReloading);
+    const char* text = !gClient.mDidInit ? "Shader reload is unavailable. Rebuild this Debug app."
+                       : busy          ? "Compiling shaders..."
+                       : gClient.mError[0] ? gClient.mError : "Shaders ready";
+    if (message && capacity)
+        snprintf(message, capacity, "%s", text);
+    return !gClient.mDidInit ? -1 : busy ? 1 : gClient.mError[0] ? 2 : 0;
+}
+#endif // ENABLE_FORGE_RELOAD_SHADER

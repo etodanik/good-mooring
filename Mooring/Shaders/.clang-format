@@ -1,0 +1,26 @@
+BasedOnStyle: InheritParentConfig
+UseCRLF: false
+ColumnLimit: 120
+AlignConsecutiveDeclarations: None
+AllowShortFunctionsOnASingleLine: None
+SeparateDefinitionBlocks: Always
+ReflowComments: false
+
+# FSL parses these declarations and return values one line at a time.
+StatementMacros:
+  - INIT_MAIN
+  - NUM_THREADS
+  - DECL_CBUFFER
+  - DECL_BUFFER
+  - DECL_RWBUFFER
+  - DECL_TEXTURE
+  - DECL_RWTEXTURE
+MacroBlockBegin: '^BEGIN_SRT(_SET|_NO_AB)?$'
+MacroBlockEnd: '^END_SRT(_SET)?$'
+WhitespaceSensitiveMacros:
+  - RETURN
+  - DATA
+  - SHADER_PREVIEW
+  - SHADER_PREVIEW_1D
+  - SHADER_PREVIEW_2D
+  - SHADER_PREVIEW_3D_SLICE

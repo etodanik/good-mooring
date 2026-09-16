@@ -99,6 +99,8 @@ set(FORGE_SOURCES
     "${COMMON_DIR}/Utilities/ThirdParty/OpenSource/bstrlib/bstrlib.c"
     "${COMMON_DIR}/Utilities/ThirdParty/OpenSource/lz4/lz4.c"
     "${COMMON_DIR}/Resources/ResourceLoader/ResourceLoader.cpp"
+    "${COMMON_DIR}/Tools/ReloadServer/ReloadClient.cpp"
+    "${COMMON_DIR}/Tools/Network/Network.c"
     "${COMMON_DIR}/Application/Camera.cpp"
     "${COMMON_DIR}/Application/Screenshot/Screenshot.cpp"
     "${COMMON_DIR}/Application/UI/UI.cpp"
@@ -130,6 +132,7 @@ target_compile_options(Forge PRIVATE
     -Wno-nullability-completeness
     -Wno-incompatible-pointer-types-discards-qualifiers)
 target_compile_definitions(Forge PRIVATE ZSTD_DISABLE_ASM)
+target_compile_definitions(Forge PUBLIC $<$<CONFIG:Debug>:MOORING_SHADER_LAB>)
 target_link_libraries(Forge PUBLIC
     "-framework Cocoa"
     "-framework Metal"
@@ -203,23 +206,28 @@ add_mooring_test(MooringOceanTests "${GAME_DIR}/Tests/OceanTests.cpp" MooringCor
 add_mooring_test(MooringPhysicsTests "${GAME_DIR}/Tests/PhysicsTests.cpp" MooringCore)
 
 # Generated resources ----------------------------------------------------------
-file(GLOB MOORING_SHADER_SOURCES CONFIGURE_DEPENDS
+file(GLOB_RECURSE MOORING_SHADER_SOURCES CONFIGURE_DEPENDS
     "${GAME_DIR}/Shaders/*"
     "${COMMON_DIR}/Application/UI/Shaders/FSL/*"
     "${COMMON_DIR}/Application/Fonts/Shaders/FSL/*"
     "${COMMON_DIR}/Application/Screenshot/Shaders/FSL/*")
-set(MOORING_RESOURCE_STAMP "${MOORING_GENERATED_DIR}/resources.stamp")
-set(MOORING_FONT_SOURCE "${GAME_DIR}/Assets/Fonts/AtkinsonHyperlegible-Regular.ttf")
+# FSL's incremental cache does not track compiler flags. Keep each build
+# configuration's resources separate so Debug always includes shader sources.
+set(MOORING_RESOURCE_DIR "${MOORING_GENERATED_DIR}/$<CONFIG>")
+set(MOORING_RESOURCE_STAMP "${MOORING_RESOURCE_DIR}/resources.stamp")
+set(MOORING_FONT_SOURCE "${GAME_DIR}/Assets/Fonts/Inter-Regular.ttf")
 add_custom_command(
     OUTPUT "${MOORING_RESOURCE_STAMP}"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${MOORING_GENERATED_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${MOORING_RESOURCE_DIR}"
     COMMAND ${Python3_EXECUTABLE} "${TOOLS_DIR}/build_resources.py"
         --root "${CMAKE_CURRENT_SOURCE_DIR}"
-        --output "${MOORING_GENERATED_DIR}"
+        --output "${MOORING_RESOURCE_DIR}"
+        --configuration "$<CONFIG>"
         --font-tool "$<TARGET_FILE:MooringFontTool>"
     COMMAND ${CMAKE_COMMAND} -E touch "${MOORING_RESOURCE_STAMP}"
     DEPENDS MooringFontTool
         "${TOOLS_DIR}/build_resources.py"
+        "${TOOLS_DIR}/shader_previews.py"
         "${MOORING_FONT_SOURCE}"
         ${MOORING_SHADER_SOURCES}
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -234,27 +242,36 @@ set(APP_SOURCES
     "${GAME_DIR}/Interaction.cpp"
     "${GAME_DIR}/Water/OceanRenderer.cpp"
     "${GAME_DIR}/Water/PhysicsConfig.cpp"
-    "${GAME_DIR}/Water/SeaLab.cpp")
+    "${GAME_DIR}/Water/SeaLab.cpp"
+    "${GAME_DIR}/Water/ShaderLab.cpp")
 set_source_files_properties(${APP_SOURCES} PROPERTIES LANGUAGE OBJCXX)
 add_executable(MooringSimulator MACOSX_BUNDLE ${APP_SOURCES})
 add_dependencies(MooringSimulator MooringResources)
 target_link_libraries(MooringSimulator PRIVATE MooringCamera)
 target_compile_options(MooringSimulator PRIVATE -fobjc-arc -fno-exceptions -fno-rtti)
+target_compile_definitions(MooringSimulator PRIVATE
+    MOORING_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    MOORING_PYTHON="${Python3_EXECUTABLE}")
 set_target_properties(MooringSimulator PROPERTIES
     MACOSX_BUNDLE_INFO_PLIST "${TOOLS_DIR}/Info.plist.in"
-    XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER com.mooring.simulator)
+    XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER com.mooring.simulator
+    XCODE_SCHEME_ENABLE_GPU_FRAME_CAPTURE_MODE Metal)
+# Ninja/Make must run the bundle copy step after a shader-only rebuild too.
+set_property(TARGET MooringSimulator APPEND PROPERTY LINK_DEPENDS "${MOORING_RESOURCE_STAMP}")
 add_custom_command(TARGET MooringSimulator POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E rm -rf
+        "$<TARGET_BUNDLE_CONTENT_DIR:MooringSimulator>/Resources/Shaders"
     COMMAND ${CMAKE_COMMAND} -E make_directory
         "$<TARGET_BUNDLE_CONTENT_DIR:MooringSimulator>/Resources/Shaders/MACOS"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${MOORING_GENERATED_DIR}/shaders/bin/MACOS"
-        "$<TARGET_BUNDLE_CONTENT_DIR:MooringSimulator>/Resources/Shaders/MACOS"
+        "${MOORING_RESOURCE_DIR}/shaders/bin"
+        "$<TARGET_BUNDLE_CONTENT_DIR:MooringSimulator>/Resources/Shaders"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${GAME_DIR}/Assets"
         "$<TARGET_BUNDLE_CONTENT_DIR:MooringSimulator>/Resources"
     COMMAND ${CMAKE_COMMAND} -E copy
-        "${MOORING_GENERATED_DIR}/fonts/AtkinsonHyperlegible-Regular.msdf"
-        "$<TARGET_BUNDLE_CONTENT_DIR:MooringSimulator>/Resources/Fonts/AtkinsonHyperlegible-Regular.msdf")
+        "${MOORING_RESOURCE_DIR}/fonts/Inter-Regular.msdf"
+        "$<TARGET_BUNDLE_CONTENT_DIR:MooringSimulator>/Resources/Fonts/Inter-Regular.msdf")
 
 # CTest and command-line test targets -----------------------------------------
 include(CTest)

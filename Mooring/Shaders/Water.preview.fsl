@@ -1,0 +1,59 @@
+#include "Water.srt.h"
+#include "WaterLighting.h.fsl"
+#include "WaterSampling.h.fsl"
+#include "FoamMaterial.h.fsl"
+
+float4 previewWaterHash(ShaderPreview2D preview)
+{
+    return previewScalar(hashWater(preview.coordinate));
+}
+
+SHADER_PREVIEW_2D(previewWaterHash, "Water / Hash", PREVIEW_INTEGER_GRID);
+
+float4 previewWaterNoise(ShaderPreview2D preview)
+{
+    return previewScalar(waterNoise(preview.coordinate));
+}
+
+SHADER_PREVIEW_2D(previewWaterNoise, "Water / Noise", PREVIEW_CONTINUOUS);
+
+float4 previewWaterFresnel(ShaderPreview1D preview)
+{
+    float slopeVariance = max(0.0, preview.parameters.x);
+    return previewScalar(meanWaterFresnel(preview.coordinate, slopeVariance));
+}
+
+SHADER_PREVIEW_1D(previewWaterFresnel, "Water / Fresnel (parameter X: slope variance)", PREVIEW_CONTINUOUS);
+
+float4 previewWaterPhase(ShaderPreview1D preview)
+{
+    float anisotropy = clamp(preview.parameters.x, -.95, .95);
+    return previewScalar(waterPhase(preview.coordinate, anisotropy));
+}
+
+SHADER_PREVIEW_1D(previewWaterPhase, "Water / Scattering (parameter X: anisotropy)", PREVIEW_CONTINUOUS);
+
+float4 previewCloudDensity(ShaderPreview3D preview)
+{
+    float cloudCover = saturate(preview.parameters.x);
+    float footprint = max(1.0, preview.parameters.y);
+    return previewScalar(cloudDensity(preview.coordinate, cloudCover, preview.time, footprint));
+}
+
+SHADER_PREVIEW_3D_SLICE(previewCloudDensity, "Clouds / Density (X: cover, Y: footprint)", PREVIEW_CONTINUOUS);
+
+float4 previewFoamPattern(ShaderPreview2D preview)
+{
+    return foamPattern(preview.coordinate, preview.parameters.xy, preview.parameters.zw);
+}
+
+SHADER_PREVIEW_2D(previewFoamPattern, "Foam / Pattern (XY: velocity, ZW: slope)", PREVIEW_CONTINUOUS);
+
+float4 previewSampleWaterLevel(ShaderPreview2D preview)
+{
+    uint band = uint(clamp(preview.parameters.x, 0.0, 3.0));
+    uint level = uint(clamp(preview.parameters.y, 0.0, log2(gWater.surface.x)));
+    return sampleWaterLevel(preview.coordinate, band, level, WATER_FIELD_SURFACE);
+}
+
+SHADER_PREVIEW_2D(previewSampleWaterLevel, "Water / Sample level (X: band, Y: mip)", PREVIEW_CONTINUOUS);

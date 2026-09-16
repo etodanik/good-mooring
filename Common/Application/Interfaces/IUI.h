@@ -367,6 +367,8 @@ FORGE_API TFUIWidgetInteraction uiCollapsingHeaderSelectedBeginWithState(const c
 FORGE_API void                  uiCollapsingHeaderEnd();
 FORGE_API TFUIWidgetInteraction uiSelectableLabelBegin(const char* label, bool* selected);
 FORGE_API TFUIWidgetInteraction uiDebugTexture(const TFTexture* handle, float2 textureDisplaySize);
+// Draw an image and report a click in normalized image coordinates.
+FORGE_API bool uiDebugTexturePick(const TFTexture* handle, float2* pickedUV, const float2* selectedUV = nullptr);
 FORGE_API TFUIWidgetInteraction uiLabel(const char* label, TFUIAlignmentText alignment);
 FORGE_API TFUIWidgetInteraction uiColorLabel(const char* label, TFUIAlignmentText alignment, float4 color);
 FORGE_API TFUIWidgetInteraction uiSeparator(float4 color, float thickness);
@@ -374,6 +376,7 @@ FORGE_API TFUIWidgetInteraction uiVerticalSeparator(float4 color, float thicknes
 FORGE_API TFUIWidgetInteraction uiSeparatorStyled(float thickness);
 FORGE_API TFUIWidgetInteraction uiVerticalSeparatorStyled(float thickness);
 FORGE_API TFUIWidgetInteraction uiButton(const char* label);
+FORGE_API TFUIWidgetInteraction uiButtonColored(const char* label, float4 background);
 FORGE_API TFUIWidgetInteraction uiButtonImage(const char* label, const TFTexture* handle, uint2 size, uint4 rect);
 FORGE_API TFUIWidgetInteraction uiButtonSymbol(TFUISymbolType type);
 FORGE_API TFUIWidgetInteraction uiSliderCursorFloat(float* val, float min, float max, float step);
@@ -382,6 +385,7 @@ FORGE_API TFUIWidgetInteraction uiSliderFloat2(float2* val, float2 min, float2 m
 FORGE_API TFUIWidgetInteraction uiSliderFloat3(float3* val, float3 min, float3 max, float3 step);
 FORGE_API TFUIWidgetInteraction uiSliderFloat4(float4* val, float4 min, float4 max, float4 step);
 FORGE_API TFUIWidgetInteraction uiPropertyInt(int32_t* val, int32_t min, int32_t max, int32_t step);
+FORGE_API TFUIWidgetInteraction uiPropertyFloat(float* value, float minimum, float maximum, float step);
 FORGE_API TFUIWidgetInteraction uiSliderInt(int32_t* val, int32_t min, int32_t max, int32_t step);
 FORGE_API TFUIWidgetInteraction uiSliderUint(uint32_t* val, uint32_t min, uint32_t max, uint32_t step);
 FORGE_API TFUIWidgetInteraction uiRadioButton(const char* label, bool* active);
@@ -553,7 +557,8 @@ FORGE_API void                 uiSetDpiScaleSettings(TFUIDpiScaleSettings settin
 FORGE_API float                uiGetRoundScreenSize();
 FORGE_API void                 uiSetRoundScreenSize(float roundScreenSize);
 
-FORGE_API TFUIWindowInteraction uiBeginWidgetWindow(const TFUIWindowDesc* pDesc);
+// An optional open flag enables the title-bar close button and receives its closed state.
+FORGE_API TFUIWindowInteraction uiBeginWidgetWindow(const TFUIWindowDesc* pDesc, bool* open = nullptr);
 FORGE_API void                  uiEndWidgetWindow();
 
 // Widget groups
@@ -614,7 +619,7 @@ FORGE_API vec2 uiGetWindowHeight();
 FORGE_API void uiSetWindowPos(vec2 pos);
 FORGE_API void uiSetWindowSize(vec2 pos);
 FORGE_API void uiSetWindowCollapsed(bool collapsed);
-FORGE_API void uiSetWindowFocus();
+FORGE_API void uiSetWindowFocus(const char* title = nullptr);
 
 FORGE_API void uiPushWindowBackgroundColor(float4 color);
 FORGE_API void uiPopWindowBackgroundColor();
@@ -787,6 +792,8 @@ FORGE_API void uiToggleRendering(bool enabled);
 
 /// Returns true if any of the UI windows/widgets are currently hovered/active
 FORGE_API bool uiIsFocused();
+// True while the active window owns a text or numeric edit.
+FORGE_API bool uiWantsTextInput();
 
 FORGE_API bool uiIsInitialized();
 FORGE_API void uiForceReferesh();

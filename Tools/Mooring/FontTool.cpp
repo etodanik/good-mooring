@@ -43,7 +43,7 @@ int main(int argc, const char** argv)
     fsSetPathForResourceDir(pSystemFileIO, TF_RD_LOG, argv[2]);
     initLog("MooringFontTool", (LogLevel)(eWARNING | eERROR));
     AssetPipelineParams params = {};
-    params.mInFilePath = "AtkinsonHyperlegible-Regular.ttf";
+    params.mInFilePath = "Inter-Regular.ttf";
     params.mPathMode = PROCESS_MODE_FILE;
     params.mRDInput = TF_RD_FONTS;
     params.mRDOutput = TF_RD_OTHER_FILES;

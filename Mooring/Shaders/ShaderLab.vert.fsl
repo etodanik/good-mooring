@@ -1,0 +1,10 @@
+#include "ShaderPreview.h.fsl"
+
+ShaderLabFragment VS_MAIN(SV_VertexID(uint) vertexID)
+{
+    INIT_MAIN;
+    ShaderLabFragment output;
+    output.uv = float2((vertexID << 1) & 2, vertexID & 2);
+    output.position = float4(output.uv * float2(2, -2) + float2(-1, 1), 0, 1);
+    RETURN(output);
+}

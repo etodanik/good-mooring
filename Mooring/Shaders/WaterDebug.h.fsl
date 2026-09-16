@@ -1,0 +1,51 @@
+#ifndef MOORING_WATER_DEBUG
+#define MOORING_WATER_DEBUG
+
+// Values match the debug-view menu in SeaLab.cpp.
+#define WATER_DEBUG_FINAL                  0
+#define WATER_DEBUG_NORMAL_MIP_LEVEL       1
+#define WATER_DEBUG_FOAM_COVERAGE          2
+#define WATER_DEBUG_NORMALS                3
+#define WATER_DEBUG_SPECTRAL_FOAM          4
+#define WATER_DEBUG_PERSISTENT_FOAM        5
+#define WATER_DEBUG_CONTACT_FOAM           6
+#define WATER_DEBUG_SHADOWS                7
+#define WATER_DEBUG_TRACED_REFLECTION      8
+#define WATER_DEBUG_OPAQUE_DEPTH           9
+#define WATER_DEBUG_SUBSURFACE_SCATTERING  10
+#define WATER_DEBUG_REFRACTION             11
+#define WATER_DEBUG_SUN_GLINTS             12
+#define WATER_DEBUG_UNDERWATER_RAYS        13
+#define WATER_DEBUG_CLOUD_SHADOWS          14
+#define WATER_DEBUG_LOCAL_WAVES            15
+#define WATER_DEBUG_WAVE_COMPRESSION       16
+#define WATER_DEBUG_MICRO_NORMALS          17
+#define WATER_DEBUG_SPRAY                  18
+#define WATER_DEBUG_RAIN                   19
+#define WATER_DEBUG_ATMOSPHERIC_RAYS       20
+#define WATER_DEBUG_FOG                    21
+#define WATER_DEBUG_WAVE_HEIGHT            22
+#define WATER_DEBUG_LOCAL_NORMALS          23
+#define WATER_DEBUG_SKY_RADIANCE           24
+#define WATER_DEBUG_SKY_CLOUD_OPACITY      25
+#define WATER_DEBUG_MESH_NORMALS           26
+#define WATER_DEBUG_REFLECTION_COVERAGE    27
+#define WATER_DEBUG_FOAM_NORMALS           28
+#define WATER_DEBUG_FOAM_FLOW              29
+#define WATER_DEBUG_CLOUD_NOISE            30
+#define WATER_DEBUG_CLOUD_DENSITY          31
+#define WATER_DEBUG_WATER_LIGHT_THICKNESS  32
+#define WATER_DEBUG_BUBBLE_LIGHT           33
+#define WATER_DEBUG_ACTIVE_BREAKING        34
+#define WATER_DEBUG_FOAM_AGE               35
+#define WATER_DEBUG_ENTRAINED_AIR          36
+#define WATER_DEBUG_BLOOM                  37
+#define WATER_DEBUG_AIRBORNE_SPRAY         38
+#define WATER_DEBUG_SURFACE_FOAM           39
+#define WATER_DEBUG_MIST                   40
+#define WATER_DEBUG_CREST_SOURCES          41
+#define WATER_DEBUG_ENVIRONMENT_REFLECTION 42
+#define WATER_DEBUG_WATER_BODY             43
+#define WATER_DEBUG_FRESNEL                44
+
+#endif

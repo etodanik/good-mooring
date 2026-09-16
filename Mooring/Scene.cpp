@@ -1,8 +1,10 @@
+#include "Water/ShaderLab.h"
 #include "Scene.h"
 #include "GraphicsMath.h"
 #include "Simulation/Hydrodynamics.h"
 #include "Water/OceanRenderer.h"
 #include "Water/WaterProfile.h"
+#include "Tools/Mooring/TracyMetal.h"
 #include "Common/Graphics/Interfaces/IGraphics.h"
 #include "Common/Resources/ResourceLoader/Interfaces/IResourceLoader.h"
 #include "Common/Graphics/FSL/defaults.h"
@@ -76,6 +78,7 @@ static TFRenderTarget* sceneTarget(Scene* s, unsigned width, unsigned height, Ti
         desc.mDescriptors = TF_DESCRIPTOR_TYPE_TEXTURE;
     TFRenderTarget* target = nullptr;
     addRenderTarget(s->renderer, &desc, &target);
+    shaderLabRegisterTexture(s, name, target->pTexture, !depth && !transient);
     return target;
 }
 static void transitionTarget(TFCmd* cmd, TFRenderTarget* target, bool render)
@@ -164,49 +167,15 @@ Scene* createScene(TFRenderer* r)
     waitForAllResourceLoads();
     return s;
 }
-void loadScene(Scene* s, uint32_t format, unsigned width, unsigned height, const WaterLook& look)
+static bool loadSceneShaders(Scene* s, uint32_t format)
 {
-    MTRACY_ZONE("loadScene");
     TFShaderLoadDesc shader = {};
     shader.mVert.pFileName = "marina.vert";
     shader.mFrag.pFileName = "marina.frag";
-    addShader(s->renderer, &shader, &s->shader);
+    shaderLabAddShader(s->renderer, &shader, &s->shader);
     shader.mVert.pFileName = "marina_post.vert";
     shader.mFrag.pFileName = "marina_post.frag";
-    addShader(s->renderer, &shader, &s->postShader);
-    TFDescriptorSetDesc set = SRT_SET_DESC(MarinaScene, PerFrame, 6, 0);
-    addDescriptorSet(s->renderer, &set, &s->descriptors);
-    s->depth = sceneTarget(s, width, height, TinyImageFormat_D32_SFLOAT, true, "Marina depth");
-    s->opaque = sceneTarget(s, width, height, TinyImageFormat_R16G16B16A16_SFLOAT, false, "Opaque colour and view depth");
-    s->composite = sceneTarget(s, width, height, TinyImageFormat_R16G16B16A16_SFLOAT, false, "Water HDR composite");
-    s->airRays =
-        sceneTarget(s, (width + 3) / 4, (height + 3) / 4, TinyImageFormat_R16G16B16A16_SFLOAT, false, "Atmospheric rays and view depth");
-    for (unsigned level = 0; level < TF_ARRAY_COUNT(s->bloom); ++level)
-    {
-        unsigned divisor = 4u << level;
-        s->bloom[level] = sceneTarget(s, (width + divisor - 1) / divisor, (height + divisor - 1) / divisor,
-                                      TinyImageFormat_R16G16B16A16_SFLOAT, false, "Bloom");
-    }
-    s->reflection = sceneTarget(s, (width + look.reflectionDivisor - 1) / look.reflectionDivisor,
-                                (height + look.reflectionDivisor - 1) / look.reflectionDivisor, TinyImageFormat_R16G16B16A16_SFLOAT, false,
-                                "Planar reflection");
-    s->reflectionDepth = sceneTarget(s, (width + look.reflectionDivisor - 1) / look.reflectionDivisor,
-                                     (height + look.reflectionDivisor - 1) / look.reflectionDivisor, TinyImageFormat_D32_SFLOAT, true,
-                                     "Reflection depth", true);
-    s->shadow = sceneTarget(s, look.shadowSize, look.shadowSize, TinyImageFormat_R32_SFLOAT, false, "Water shadow map");
-    s->shadow->mClearValue.r = 1;
-    s->shadowDepth = sceneTarget(s, look.shadowSize, look.shadowSize, TinyImageFormat_D32_SFLOAT, true, "Shadow depth", true);
-    s->waterLight = sceneTarget(s, look.waterLightSize, look.waterLightSize, TinyImageFormat_R32_SFLOAT, false, "Water light entry depth");
-    s->waterLight->mClearValue.r = 1;
-    s->waterLightDepth =
-        sceneTarget(s, look.waterLightSize, look.waterLightSize, TinyImageFormat_D32_SFLOAT, true, "Water light depth test", true);
-    TFSamplerDesc sampler = {};
-    sampler.mMinFilter = sampler.mMagFilter = TF_FILTER_LINEAR;
-    sampler.mMipMapMode = TF_MIPMAP_MODE_NEAREST;
-    sampler.mAddressU = sampler.mAddressV = sampler.mAddressW = TF_ADDRESS_MODE_CLAMP_TO_EDGE;
-    addSampler(s->renderer, &sampler, &s->sampler);
-    set = SRT_SET_DESC(MarinaPost, PerFrame, 12, 0);
-    addDescriptorSet(s->renderer, &set, &s->postDescriptors);
+    shaderLabAddShader(s->renderer, &shader, &s->postShader);
     TFVertexLayout vertices = {};
     vertices.mBindingCount = 1;
     vertices.mBindings[0].mStride = sizeof(Vertex);
@@ -244,36 +213,82 @@ void loadScene(Scene* s, uint32_t format, unsigned width, unsigned height, const
     g.mSampleCount = TF_SAMPLE_COUNT_1;
     g.mPrimitiveTopo = TF_PRIMITIVE_TOPO_TRI_LIST;
     p.pName = "Opaque geometry";
-    addPipeline(s->renderer, &p, &s->pipeline);
+    shaderLabAddPipeline(s->renderer, &p, &s->pipeline);
     color = TinyImageFormat_R32_SFLOAT;
     p.pName = "Scene shadow";
-    addPipeline(s->renderer, &p, &s->shadowPipeline);
+    shaderLabAddPipeline(s->renderer, &p, &s->shadowPipeline);
     PIPELINE_LAYOUT_DESC(p, nullptr, SRT_LAYOUT_DESC(MarinaPost, PerFrame), nullptr, nullptr);
     g.pShaderProgram = s->postShader;
     g.pVertexLayout = nullptr;
     g.pDepthState = nullptr;
     color = TinyImageFormat_R16G16B16A16_SFLOAT;
-    p.pName = "HDR copy and bloom";
-    addPipeline(s->renderer, &p, &s->copyPipeline);
+    p.pName = "HDR copy";
+    shaderLabAddPipeline(s->renderer, &p, &s->copyPipeline);
     g.mDepthStencilFormat = TinyImageFormat_UNDEFINED;
-    p.pName = "Atmospheric integration";
-    addPipeline(s->renderer, &p, &s->airPipeline);
+    p.pName = "Atmosphere and bloom";
+    shaderLabAddPipeline(s->renderer, &p, &s->airPipeline);
     color = static_cast<TinyImageFormat>(format);
     p.pName = "Tone mapping and composite";
-    addPipeline(s->renderer, &p, &s->postPipeline);
+    shaderLabAddPipeline(s->renderer, &p, &s->postPipeline);
+    return s->pipeline && s->shadowPipeline && s->copyPipeline && s->airPipeline && s->postPipeline;
+}
+void loadScene(Scene* s, uint32_t format, unsigned width, unsigned height, const WaterLook& look)
+{
+    MTRACY_ZONE("loadScene");
+    TFDescriptorSetDesc set = SRT_SET_DESC(MarinaScene, PerFrame, 6, 0);
+    addDescriptorSet(s->renderer, &set, &s->descriptors);
+    s->depth = sceneTarget(s, width, height, TinyImageFormat_D32_SFLOAT, true, "Marina depth");
+    s->opaque = sceneTarget(s, width, height, TinyImageFormat_R16G16B16A16_SFLOAT, false, "Opaque colour and view depth");
+    s->composite = sceneTarget(s, width, height, TinyImageFormat_R16G16B16A16_SFLOAT, false, "Water HDR composite");
+    s->airRays =
+        sceneTarget(s, (width + 3) / 4, (height + 3) / 4, TinyImageFormat_R16G16B16A16_SFLOAT, false, "Atmospheric rays and view depth");
+    for (unsigned level = 0; level < TF_ARRAY_COUNT(s->bloom); ++level)
+    {
+        unsigned divisor = 4u << level;
+        const char* names[] = { "Bloom / Near", "Bloom / Middle", "Bloom / Far" };
+        s->bloom[level] = sceneTarget(s, (width + divisor - 1) / divisor, (height + divisor - 1) / divisor,
+                                      TinyImageFormat_R16G16B16A16_SFLOAT, false, names[level]);
+    }
+    s->reflection = sceneTarget(s, (width + look.reflectionDivisor - 1) / look.reflectionDivisor,
+                                (height + look.reflectionDivisor - 1) / look.reflectionDivisor, TinyImageFormat_R16G16B16A16_SFLOAT, false,
+                                "Planar reflection");
+    s->reflectionDepth = sceneTarget(s, (width + look.reflectionDivisor - 1) / look.reflectionDivisor,
+                                     (height + look.reflectionDivisor - 1) / look.reflectionDivisor, TinyImageFormat_D32_SFLOAT, true,
+                                     "Reflection depth", true);
+    s->shadow = sceneTarget(s, look.shadowSize, look.shadowSize, TinyImageFormat_R32_SFLOAT, false, "Water shadow map");
+    s->shadow->mClearValue.r = 1;
+    s->shadowDepth = sceneTarget(s, look.shadowSize, look.shadowSize, TinyImageFormat_D32_SFLOAT, true, "Shadow depth", true);
+    s->waterLight = sceneTarget(s, look.waterLightSize, look.waterLightSize, TinyImageFormat_R32_SFLOAT, false, "Water light entry depth");
+    s->waterLight->mClearValue.r = 1;
+    s->waterLightDepth =
+        sceneTarget(s, look.waterLightSize, look.waterLightSize, TinyImageFormat_D32_SFLOAT, true, "Water light depth test", true);
+    TFSamplerDesc sampler = {};
+    sampler.mMinFilter = sampler.mMagFilter = TF_FILTER_LINEAR;
+    sampler.mMipMapMode = TF_MIPMAP_MODE_NEAREST;
+    sampler.mAddressU = sampler.mAddressV = sampler.mAddressW = TF_ADDRESS_MODE_CLAMP_TO_EDGE;
+    addSampler(s->renderer, &sampler, &s->sampler);
+    set = SRT_SET_DESC(MarinaPost, PerFrame, 12, 0);
+    addDescriptorSet(s->renderer, &set, &s->postDescriptors);
+    loadSceneShaders(s, format);
+}
+
+static void unloadSceneShaders(Scene* s)
+{
+    shaderLabRemovePipeline(s->renderer, s->pipeline);
+    shaderLabRemovePipeline(s->renderer, s->shadowPipeline);
+    shaderLabRemovePipeline(s->renderer, s->copyPipeline);
+    shaderLabRemovePipeline(s->renderer, s->postPipeline);
+    shaderLabRemovePipeline(s->renderer, s->airPipeline);
+    shaderLabRemoveShader(s->renderer, s->shader);
+    shaderLabRemoveShader(s->renderer, s->postShader);
 }
 void unloadScene(Scene* s)
 {
     MTRACY_ZONE("unloadScene");
-    removePipeline(s->renderer, s->pipeline);
-    removePipeline(s->renderer, s->shadowPipeline);
-    removePipeline(s->renderer, s->copyPipeline);
-    removePipeline(s->renderer, s->postPipeline);
-    removePipeline(s->renderer, s->airPipeline);
-    removeDescriptorSet(s->renderer, s->descriptors);
-    removeDescriptorSet(s->renderer, s->postDescriptors);
-    removeShader(s->renderer, s->shader);
-    removeShader(s->renderer, s->postShader);
+    shaderLabForgetResources(s);
+    unloadSceneShaders(s);
+    shaderLabRemoveDescriptorSet(s->renderer, s->descriptors);
+    shaderLabRemoveDescriptorSet(s->renderer, s->postDescriptors);
     removeSampler(s->renderer, s->sampler);
     for (auto* target : s->bloom)
         removeRenderTarget(s->renderer, target);
@@ -281,9 +296,28 @@ void unloadScene(Scene* s)
                           s->waterLight, s->waterLightDepth })
         removeRenderTarget(s->renderer, target);
 }
+bool reloadSceneShaders(Scene* s, uint32_t format)
+{
+    Scene pending{};
+    pending.renderer = s->renderer;
+    bool valid = loadSceneShaders(&pending, format);
+    if (valid)
+    {
+        std::swap(s->shader, pending.shader);
+        std::swap(s->postShader, pending.postShader);
+        std::swap(s->pipeline, pending.pipeline);
+        std::swap(s->shadowPipeline, pending.shadowPipeline);
+        std::swap(s->copyPipeline, pending.copyPipeline);
+        std::swap(s->airPipeline, pending.airPipeline);
+        std::swap(s->postPipeline, pending.postPipeline);
+    }
+    unloadSceneShaders(&pending);
+    return valid;
+}
 void destroyScene(Scene* s)
 {
     MTRACY_ZONE("destroyScene");
+    shaderLabForgetResources(s);
     for (unsigned i = 0; i < 2; ++i)
     {
         removeResource(s->vertices[i]);
@@ -326,7 +360,7 @@ void connectSceneWater(Scene* s, OceanRenderer* water)
             d[8].ppTextures = &sky;
             d[9].mIndex = SRT_RES_IDX(MarinaPost, PerFrame, gCloudNoiseTexture);
             d[9].ppTextures = &noise;
-            updateDescriptorSet(s->renderer, i * 6 + p, s->postDescriptors, TF_ARRAY_COUNT(d), d);
+            shaderLabUpdateDescriptorSet(s->renderer, i * 6 + p, s->postDescriptors, TF_ARRAY_COUNT(d), d);
         }
     for (unsigned i = 0; i < 2; ++i)
         for (unsigned p = 0; p < 3; ++p)
@@ -336,7 +370,7 @@ void connectSceneWater(Scene* s, OceanRenderer* water)
             d[0].ppBuffers = &s->cameras[i][p];
             d[1].mIndex = SRT_RES_IDX(MarinaScene, PerFrame, gCloudNoiseTexture);
             d[1].ppTextures = &noise;
-            updateDescriptorSet(s->renderer, i * 3 + p, s->descriptors, TF_ARRAY_COUNT(d), d);
+            shaderLabUpdateDescriptorSet(s->renderer, i * 3 + p, s->descriptors, TF_ARRAY_COUNT(d), d);
         }
 }
 void drawScene(Scene* s, TFCmd* cmd, TFRenderTarget* target, unsigned frame, const Camera& camera, const Snapshot& boat,
@@ -344,6 +378,21 @@ void drawScene(Scene* s, TFCmd* cmd, TFRenderTarget* target, unsigned frame, con
                const WaterProfile* profile)
 {
     MTRACY_ZONE("drawScene");
+    shaderLabRegisterBuffer(s, "Scene / Vertices", s->vertices[frame],
+                            { unsigned(s->vertices[frame]->mSize / sizeof(Vertex)), 1, 1, 1, sizeof(Vertex), 4,
+                              ShaderLabScalar::Float, "Position XYZ, normal X (40-byte vertex stride)" });
+    for (unsigned index = 0; index < 3; ++index)
+    {
+        char name[64]; snprintf(name, sizeof name, "Scene / Camera %u", index);
+        shaderLabRegisterBuffer(s, name, s->cameras[frame][index],
+                                { unsigned(s->cameras[frame][index]->mSize / 16), 1, 1, 1, 16, 4 });
+    }
+    for (unsigned index = 0; index < 6; ++index)
+    {
+        char name[64]; snprintf(name, sizeof name, "Post / Constants %u", index);
+        shaderLabRegisterBuffer(s, name, s->postCameras[frame][index],
+                                { unsigned(s->postCameras[frame][index]->mSize / 16), 1, 1, 1, 16, 4 });
+    }
     s->count = 0;
     box(s, { 0, level - waterDepth - .5f, 0 }, { 800, 1, 800 }, { look.seabedColor[0], look.seabedColor[1], look.seabedColor[2] });
     const unsigned seabedVertices = s->count;
@@ -484,8 +533,8 @@ void drawScene(Scene* s, TFCmd* cmd, TFRenderTarget* target, unsigned frame, con
     {
         transitionTarget(cmd, targets[p], true);
         bindSceneTarget(cmd, targets[p], depths[p], TF_LOAD_ACTION_CLEAR);
-        cmdBindPipeline(cmd, p == 2 ? s->shadowPipeline : s->pipeline);
-        cmdBindDescriptorSet(cmd, frame * 3 + p, s->descriptors);
+        shaderLabBindPipeline(cmd, p == 2 ? s->shadowPipeline : s->pipeline);
+        shaderLabBindDescriptorSet(cmd, frame * 3 + p, s->descriptors);
         cmdBindVertexBuffer(cmd, 1, &s->vertices[frame], &stride, &offset);
         cmdDraw(cmd, s->count, 0);
         transitionTarget(cmd, targets[p], false);
@@ -502,8 +551,8 @@ void drawScene(Scene* s, TFCmd* cmd, TFRenderTarget* target, unsigned frame, con
     // Sky, water and spray share one pass. Starting a second pass without a
     // write-to-write dependency let the sky copy overwrite water tiles on Metal.
     bindSceneTarget(cmd, s->composite, s->depth, TF_LOAD_ACTION_DONTCARE, TF_LOAD_ACTION_LOAD);
-    cmdBindPipeline(cmd, s->copyPipeline);
-    cmdBindDescriptorSet(cmd, frame * 6, s->postDescriptors);
+    shaderLabBindPipeline(cmd, s->copyPipeline);
+    shaderLabBindDescriptorSet(cmd, frame * 6, s->postDescriptors);
     cmdDraw(cmd, 3, 0);
     drawOcean(water, cmd, frame);
     transitionTarget(cmd, s->composite, false);
@@ -514,9 +563,10 @@ void drawScene(Scene* s, TFCmd* cmd, TFRenderTarget* target, unsigned frame, con
     {
         transitionTarget(cmd, s->airRays, true);
         bindSceneTarget(cmd, s->airRays, nullptr, TF_LOAD_ACTION_DONTCARE);
-        cmdBindPipeline(cmd, s->airPipeline);
-        cmdBindDescriptorSet(cmd, frame * 6 + 2, s->postDescriptors);
+        shaderLabBindPipeline(cmd, s->airPipeline);
+        shaderLabBindDescriptorSet(cmd, frame * 6 + 2, s->postDescriptors);
         cmdDraw(cmd, 3, 0);
+        mooringTracyMetalNameEncoder(cmd, "Post / Atmospheric integration");
         transitionTarget(cmd, s->airRays, false);
         cmdBindRenderTargets(cmd, nullptr);
     }
@@ -525,15 +575,17 @@ void drawScene(Scene* s, TFCmd* cmd, TFRenderTarget* target, unsigned frame, con
         {
             transitionTarget(cmd, s->bloom[level], true);
             bindSceneTarget(cmd, s->bloom[level], nullptr, TF_LOAD_ACTION_DONTCARE);
-            cmdBindPipeline(cmd, s->airPipeline);
-            cmdBindDescriptorSet(cmd, frame * 6 + 3 + level, s->postDescriptors);
+            shaderLabBindPipeline(cmd, s->airPipeline);
+            shaderLabBindDescriptorSet(cmd, frame * 6 + 3 + level, s->postDescriptors);
             cmdDraw(cmd, 3, 0);
+            const char* names[] = { "Post / Bloom level 0", "Post / Bloom level 1", "Post / Bloom level 2" };
+            mooringTracyMetalNameEncoder(cmd, names[level]);
             transitionTarget(cmd, s->bloom[level], false);
             cmdBindRenderTargets(cmd, nullptr);
         }
     bindSceneTarget(cmd, target, nullptr, TF_LOAD_ACTION_DONTCARE);
-    cmdBindPipeline(cmd, s->postPipeline);
-    cmdBindDescriptorSet(cmd, frame * 6 + 1, s->postDescriptors);
+    shaderLabBindPipeline(cmd, s->postPipeline);
+    shaderLabBindDescriptorSet(cmd, frame * 6 + 1, s->postDescriptors);
     cmdDraw(cmd, 3, 0);
     TFRenderTargetBarrier uiBarrier = { target, TF_RESOURCE_STATE_RENDER_TARGET, TF_RESOURCE_STATE_RENDER_TARGET };
     cmdResourceBarrier(cmd, 0, nullptr, 0, nullptr, 1, &uiBarrier);

@@ -1,129 +1,196 @@
+#define WATER_LONG_BAND_LENGTH_METERS        256.0
+#define WATER_MEDIUM_BAND_LENGTH_METERS      64.0
+#define WATER_SHORT_BAND_LENGTH_METERS       16.0
+#define WATER_RIPPLE_BAND_LENGTH_METERS      2.0
+#define WATER_CAMERA_COT_HALF_FOV            2.41421356
+#define WATER_LOCAL_PATCH_SIZE_METERS        64
+#define WATER_LOCAL_FOAM_RESOLUTION          256
+#define WATER_LOCAL_FOAM_CENTER_TEXEL        128
+#define WATER_LOCAL_FOAM_LAST_FILTER_TEXEL   254
+#define WATER_LOCAL_FOAM_FADE_START_METERS   25.0
+#define WATER_LOCAL_FOAM_FADE_END_METERS     31.5
+#define WATER_SURFACE_INVERSION_ITERATIONS   4
+#define WATER_EFFECT_SAMPLE_FOOTPRINT_METERS .35
+#define WATER_SURFACE_MIP_OFFSET_SCALE       16
+#define WATER_WHITEWATER_MIP_OFFSET_SCALE    8
+#define WATER_MIP_SERIES_DIVISOR             3
+
 // Bilinear / trilinear sampling of persistent buffer mip chains. Mip centres
 // shift by half a parent cell; account for that to prevent waves moving with LOD.
 float3 cameraRay(float2 uv)
 {
-    float3 forward=normalize(gWater.origin.xyz-gWater.eye.xyz);
-    float3 right=normalize(cross(float3(0,1,0),forward));
-    float3 up=normalize(cross(forward,right));
-    return forward+(right*(uv.x*2-1)*gWater.screen.x/max(1.0,gWater.screen.y)+up*(1-uv.y*2))/2.41421356;
+    float3 forward = normalize(gWater.origin.xyz - gWater.eye.xyz);
+    float3 right = normalize(cross(float3(0, 1, 0), forward));
+    float3 up = normalize(cross(forward, right));
+    return forward + (right * (uv.x * 2 - 1) * gWater.screen.x / max(1.0, gWater.screen.y) + up * (1 - uv.y * 2)) /
+                         WATER_CAMERA_COT_HALF_FOV;
 }
-#define WATER_FIELD_SURFACE 0
-#define WATER_FIELD_NORMALS 1
-#define WATER_FIELD_PREVIOUS 2
+
+#define WATER_FIELD_SURFACE    0
+#define WATER_FIELD_NORMALS    1
+#define WATER_FIELD_PREVIOUS   2
 #define WATER_FIELD_WHITEWATER 3
-float4 sampleWaterLevel(float2 location,uint band,uint level,uint field)
+
+float4 sampleWaterLevel(float2 location, uint band, uint level, uint field)
 {
-    uint n=uint(gWater.surface.x), m=n>>level;
-    float length=band==0?256.0:band==1?64.0:band==2?16.0:2.0;
-    float2 uv=location/length*float(m)-(.5-.5/float(1u<<level));
-    int2 base=int2(floor(uv)); float2 f=frac(uv);
-    uint offset=16*((n*n-m*m)/3)+band*m*m;
-    if(field==WATER_FIELD_WHITEWATER) offset=8*((n*n-m*m)/3)+(band/2)*m*m;
-    float4 result=float4(0,0,0,0);
-    for(uint y=0;y<2;y++) for(uint x=0;x<2;x++)
-    {
-        uint2 p=uint2(base+int2(x,y))&(m-1);
-        float weight=(x!=0?f.x:1-f.x)*(y!=0?f.y:1-f.y);
-        uint i=offset+p.y*m+p.x;
-        float4 value=field==WATER_FIELD_NORMALS?gWaterNormals[i]:field==WATER_FIELD_PREVIOUS?gPreviousWaterSurface[i]:
-                     field==WATER_FIELD_WHITEWATER?float4(gWhitewater[i]):gWaterSurface[i];
-        // Interpolate each texel's unresolved variance. The difference between
-        // resolved neighbouring slopes is not roughness within this pixel.
-        if(field==WATER_FIELD_NORMALS) value.z=max(0.0,value.z-dot(value.xy,value.xy));
-        result+=value*weight;
-    }
-    if(field==WATER_FIELD_NORMALS) result.z+=dot(result.xy,result.xy);
-    return result;
-}
-float4 sampleWaterField(float2 location,uint band,float footprint,uint field)
-{
-    float length=band==0?256.0:band==1?64.0:band==2?16.0:2.0;
-    float lod=clamp(log2(max(1.0,footprint*gWater.surface.x/length)),0.0,log2(gWater.surface.x));
-    uint a=uint(floor(lod)), b=min(a+1,uint(log2(gWater.surface.x)));
-    float4 low=sampleWaterLevel(location,band,a,field);
-    if(lod==float(a)) return low;
-    float4 high=sampleWaterLevel(location,band,b,field);
-    float4 result=lerp(low,high,frac(lod));
-    if(field==WATER_FIELD_NORMALS) {
-        result.z=lerp(low.z-dot(low.xy,low.xy),high.z-dot(high.xy,high.xy),frac(lod));
-        result.z+=dot(result.xy,result.xy);
-    }
-    return result;
-}
-float4 sampleWater(float2 location,uint band,float footprint,bool normals)
-{
-    return sampleWaterField(location,band,footprint,normals?WATER_FIELD_NORMALS:WATER_FIELD_SURFACE);
-}
-float4 sampleWhitewater(float2 location,float footprint)
-{
-    return sampleWaterField(location,0,footprint,WATER_FIELD_WHITEWATER)+sampleWaterField(location,2,footprint,WATER_FIELD_WHITEWATER);
-}
-float4 localWater(float2 world)
-{
-    float2 uv=(world-gWater.patch.xz)/64+.5;
-    float4 result=float4(0,0,0,0);
-    if(all(uv>=0) && all(uv<1))
-    {
-        uint resolution=uint(gWater.patch.y);
-        float2 pixel=uv*float(resolution), blend=frac(pixel); uint2 base=uint2(floor(pixel));
-        for(uint y=0;y<2;y++) for(uint x=0;x<2;x++)
+    uint fullResolution = uint(gWater.surface.x);
+    uint mipResolution = fullResolution >> level;
+    float bandLength = band == 0   ? WATER_LONG_BAND_LENGTH_METERS
+                       : band == 1 ? WATER_MEDIUM_BAND_LENGTH_METERS
+                       : band == 2 ? WATER_SHORT_BAND_LENGTH_METERS
+                                   : WATER_RIPPLE_BAND_LENGTH_METERS;
+    float2 uv = location / bandLength * float(mipResolution) - (.5 - .5 / float(1u << level));
+    int2 base = int2(floor(uv));
+    float2 fraction = frac(uv);
+    // Sum the preceding mip areas across four surface bands or two whitewater bands.
+    uint offset = WATER_SURFACE_MIP_OFFSET_SCALE *
+                      ((fullResolution * fullResolution - mipResolution * mipResolution) / WATER_MIP_SERIES_DIVISOR) +
+                  band * mipResolution * mipResolution;
+    if (field == WATER_FIELD_WHITEWATER)
+        offset = WATER_WHITEWATER_MIP_OFFSET_SCALE *
+                     ((fullResolution * fullResolution - mipResolution * mipResolution) / WATER_MIP_SERIES_DIVISOR) +
+                 (band / 2) * mipResolution * mipResolution;
+    float4 result = float4(0, 0, 0, 0);
+    for (uint offsetY = 0; offsetY < 2; offsetY++)
+        for (uint offsetX = 0; offsetX < 2; offsetX++)
         {
-            uint2 p=min(base+uint2(x,y),uint2(resolution-1,resolution-1));
-            float weight=(x!=0?blend.x:1-blend.x)*(y!=0?blend.y:1-blend.y);
-            result+=gLocalSurface[p.y*resolution+p.x]*weight;
+            uint2 texel = uint2(base + int2(offsetX, offsetY)) & (mipResolution - 1);
+            float weight = (offsetX != 0 ? fraction.x : 1 - fraction.x) * (offsetY != 0 ? fraction.y : 1 - fraction.y);
+            uint sampleIndex = offset + texel.y * mipResolution + texel.x;
+            float4 value = field == WATER_FIELD_NORMALS      ? gWaterNormals[sampleIndex]
+                           : field == WATER_FIELD_PREVIOUS   ? gPreviousWaterSurface[sampleIndex]
+                           : field == WATER_FIELD_WHITEWATER ? float4(gWhitewater[sampleIndex])
+                                                             : gWaterSurface[sampleIndex];
+            // Interpolate each texel's unresolved variance. The difference between
+            // resolved neighbouring slopes is not roughness within this pixel.
+            if (field == WATER_FIELD_NORMALS)
+                value.z = max(0.0, value.z - dot(value.xy, value.xy));
+            result += value * weight;
         }
+    if (field == WATER_FIELD_NORMALS)
+        result.z += dot(result.xy, result.xy);
+    return result;
+}
+
+float4 sampleWaterField(float2 location, uint band, float footprint, uint field)
+{
+    float bandLength = band == 0   ? WATER_LONG_BAND_LENGTH_METERS
+                       : band == 1 ? WATER_MEDIUM_BAND_LENGTH_METERS
+                       : band == 2 ? WATER_SHORT_BAND_LENGTH_METERS
+                                   : WATER_RIPPLE_BAND_LENGTH_METERS;
+    float lod = clamp(log2(max(1.0, footprint * gWater.surface.x / bandLength)), 0.0, log2(gWater.surface.x));
+    uint lowerMip = uint(floor(lod));
+    uint upperMip = min(lowerMip + 1, uint(log2(gWater.surface.x)));
+    float4 lowerSample = sampleWaterLevel(location, band, lowerMip, field);
+    if (lod == float(lowerMip))
+        return lowerSample;
+    float4 upperSample = sampleWaterLevel(location, band, upperMip, field);
+    float4 result = lerp(lowerSample, upperSample, frac(lod));
+    if (field == WATER_FIELD_NORMALS)
+    {
+        result.z = lerp(lowerSample.z - dot(lowerSample.xy, lowerSample.xy),
+                        upperSample.z - dot(upperSample.xy, upperSample.xy), frac(lod));
+        result.z += dot(result.xy, result.xy);
     }
     return result;
 }
 
-float4 localFoam(float2 world,bool whitewater)
+float4 sampleWater(float2 location, uint band, float footprint, bool normals)
 {
-    float2 pixel=(world-gWater.foamPatch.xy)/64*256+128;
-    if(any(pixel<0) || any(pixel>254)) return whitewater?float4(0,0,0,0):float4(0,0,gWater.current.xz);
-    uint2 base=uint2(floor(pixel)); float2 f=frac(pixel); float4 foam=float4(0,0,0,0);
-    for(uint y=0;y<2;y++) for(uint x=0;x<2;x++)
+    return sampleWaterField(location, band, footprint, normals ? WATER_FIELD_NORMALS : WATER_FIELD_SURFACE);
+}
+
+float4 sampleWhitewater(float2 location, float footprint)
+{
+    return sampleWaterField(location, 0, footprint, WATER_FIELD_WHITEWATER) +
+           sampleWaterField(location, 2, footprint, WATER_FIELD_WHITEWATER);
+}
+
+float4 localWater(float2 world)
+{
+    float2 uv = (world - gWater.patch.xz) / WATER_LOCAL_PATCH_SIZE_METERS + .5;
+    float4 result = float4(0, 0, 0, 0);
+    if (all(uv >= 0) && all(uv < 1))
     {
-        uint i=(base.y+y)*256+base.x+x;
-        foam+=(whitewater?float4(gLocalWhitewater[i]):gFoamDraw[i])*(x!=0?f.x:1-f.x)*(y!=0?f.y:1-f.y);
+        uint resolution = uint(gWater.patch.y);
+        float2 pixel = uv * float(resolution);
+        float2 blend = frac(pixel);
+        uint2 base = uint2(floor(pixel));
+        for (uint offsetY = 0; offsetY < 2; offsetY++)
+            for (uint offsetX = 0; offsetX < 2; offsetX++)
+            {
+                uint2 texel = min(base + uint2(offsetX, offsetY), uint2(resolution - 1, resolution - 1));
+                float weight = (offsetX != 0 ? blend.x : 1 - blend.x) * (offsetY != 0 ? blend.y : 1 - blend.y);
+                result += gLocalSurface[texel.y * resolution + texel.x] * weight;
+            }
     }
-    float edge=1-smoothstep(25.0,31.5,max(abs(world.x-gWater.foamPatch.x),abs(world.y-gWater.foamPatch.y)));
-    if(whitewater) foam*=edge; else foam.x*=edge;
+    return result;
+}
+
+float4 localFoam(float2 world, bool whitewater)
+{
+    float2 pixel = (world - gWater.foamPatch.xy) / WATER_LOCAL_PATCH_SIZE_METERS * WATER_LOCAL_FOAM_RESOLUTION +
+                   WATER_LOCAL_FOAM_CENTER_TEXEL;
+    if (any(pixel < 0) || any(pixel > WATER_LOCAL_FOAM_LAST_FILTER_TEXEL))
+        return whitewater ? float4(0, 0, 0, 0) : float4(0, 0, gWater.current.xz);
+    uint2 base = uint2(floor(pixel));
+    float2 fraction = frac(pixel);
+    float4 foam = float4(0, 0, 0, 0);
+    for (uint offsetY = 0; offsetY < 2; offsetY++)
+        for (uint offsetX = 0; offsetX < 2; offsetX++)
+        {
+            uint sampleIndex = (base.y + offsetY) * WATER_LOCAL_FOAM_RESOLUTION + base.x + offsetX;
+            foam += (whitewater ? float4(gLocalWhitewater[sampleIndex]) : gFoamDraw[sampleIndex]) *
+                    (offsetX != 0 ? fraction.x : 1 - fraction.x) * (offsetY != 0 ? fraction.y : 1 - fraction.y);
+        }
+    float edge = 1 - smoothstep(WATER_LOCAL_FOAM_FADE_START_METERS, WATER_LOCAL_FOAM_FADE_END_METERS,
+                                max(abs(world.x - gWater.foamPatch.x), abs(world.y - gWater.foamPatch.y)));
+    if (whitewater)
+        foam *= edge;
+    else
+        foam.x *= edge;
     return foam;
 }
 
 // A material coordinate already identifies the displaced surface. Preserve it
 // for crest emission and froth instead of inverting its world position again.
-float4 surfaceAtCoordinate(float2 coordinate,float footprint,out(float2) world)
+float4 surfaceAtCoordinate(float2 coordinate, float footprint, out(float2) world)
 {
-    float3 displacement=float3(0,0,0); float foam=0; float2 slope=float2(0,0);
-    for(uint band=0;band<3;band++) {
-        float4 surface=sampleWater(coordinate,band,footprint,false);
-        displacement+=surface.xyz; foam=max(foam,surface.w);
-        slope+=sampleWater(coordinate,band,footprint,true).xy;
-    }
-    world=coordinate+displacement.xz;
-    float4 local=localWater(world);
-    return float4(gWater.surface.w+displacement.y+local.x,slope+local.yz,foam);
-}
-// World-space queries are needed for hull impacts and ballistic landings.
-float4 sampleEffectSurface(float2 world,out(float2) coordinate)
-{
-    coordinate=world;
-    for(uint iteration=0;iteration<4;iteration++)
+    float3 displacement = float3(0, 0, 0);
+    float foam = 0;
+    float2 slope = float2(0, 0);
+    for (uint band = 0; band < 3; band++)
     {
-        float2 displacement=float2(0,0);
-        for(uint band=0;band<3;band++)
+        float4 surface = sampleWater(coordinate, band, footprint, false);
+        displacement += surface.xyz;
+        foam = max(foam, surface.w);
+        slope += sampleWater(coordinate, band, footprint, true).xy;
+    }
+    world = coordinate + displacement.xz;
+    float4 local = localWater(world);
+    return float4(gWater.surface.w + displacement.y + local.x, slope + local.yz, foam);
+}
+
+// World-space queries are needed for hull impacts and ballistic landings.
+float4 sampleEffectSurface(float2 world, out(float2) coordinate)
+{
+    coordinate = world;
+    for (uint iteration = 0; iteration < WATER_SURFACE_INVERSION_ITERATIONS; iteration++)
+    {
+        float2 displacement = float2(0, 0);
+        for (uint band = 0; band < 3; band++)
         {
-            float4 sample=sampleWater(coordinate,band,.35,false);
-            displacement+=sample.xz;
+            float4 sample = sampleWater(coordinate, band, WATER_EFFECT_SAMPLE_FOOTPRINT_METERS, false);
+            displacement += sample.xz;
         }
-        coordinate=world-displacement;
+        coordinate = world - displacement;
     }
     float2 displaced;
-    return surfaceAtCoordinate(coordinate,.35,displaced);
+    return surfaceAtCoordinate(coordinate, WATER_EFFECT_SAMPLE_FOOTPRINT_METERS, displaced);
 }
+
 float4 effectSurface(float2 world)
 {
     float2 coordinate;
-    return sampleEffectSurface(world,coordinate);
+    return sampleEffectSurface(world, coordinate);
 }

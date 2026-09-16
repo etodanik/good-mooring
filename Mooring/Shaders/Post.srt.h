@@ -1,3 +1,5 @@
+#include "WaterDebug.h.fsl"
+
 STRUCT(PostConstants)
 {
     DATA(float4, forward, None);

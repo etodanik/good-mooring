@@ -1,0 +1,4 @@
+Inter Regular 4.1
+Source: https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip
+File: extras/ttf/Inter-Regular.ttf (unmodified)
+License: Inter-OFL.txt

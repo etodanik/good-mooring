@@ -23,6 +23,7 @@
  */
 
 #pragma once
+#include <stddef.h>
 
 #include "../../Application/Config.h"
 
@@ -35,3 +36,9 @@ FORGE_API bool platformGetReloadBinary(const char* path, void** pByteCode, uint3
 FORGE_API void platformUpdateReloadClient(void);
 FORGE_API void platformSetupReloadClientUI(const TFUIWindowDesc* pDesc);
 FORGE_API void platformUpdateReloadClientUI(void);
+
+// Main-thread snapshot. Never waits for the compiler thread.
+// Returns -1 when unavailable, 0 when idle, 1 while compiling, 2 on error.
+FORGE_API int platformReloadStatus(char* message, size_t capacity);
+// Set the local app-owned host before starting a reload request.
+FORGE_API bool platformSetReloadPort(uint16_t port);

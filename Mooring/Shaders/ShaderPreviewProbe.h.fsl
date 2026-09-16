@@ -1,0 +1,48 @@
+#ifndef MOORING_SHADER_PREVIEW_PROBE
+#define MOORING_SHADER_PREVIEW_PROBE
+// Production builds erase probes. Debug's source generator substitutes labels
+// with stable IDs; values are observed only in the fragment entry point.
+#define SHADER_PREVIEW(label, value)
+#if defined(MOORING_SHADER_LAB)
+float4 previewVector2(float2 value)
+{
+    return float4(value, 0, 1);
+}
+
+float4 previewVector3(float3 value)
+{
+    return float4(value, 1);
+}
+
+#define SHADER_PREVIEW_BEGIN()                    \
+    float4 shaderProbeValue = float4(0, 0, 0, 0); \
+    bool shaderProbeReached = false;
+#define SHADER_PREVIEW_VALUE(identity, value) \
+    if (gWater.effects.w == identity)         \
+    {                                         \
+        shaderProbeValue = float4(value);     \
+        shaderProbeReached = true;            \
+    }
+#define SHADER_PREVIEW_END(color, position)                                         \
+    if (gWater.effects.w >= 1000)                                                   \
+    {                                                                               \
+        color = shaderProbeDisplay(shaderProbeValue, shaderProbeReached, position); \
+    }
+
+float3 shaderProbeDisplay(float4 value, bool reached, float2 position)
+{
+    if (!reached)
+        return ((uint(position.x / 8) + uint(position.y / 8)) & 1u) != 0 ? float3(.4, 0, .4) : float3(.1, .1, .1);
+    float3 color = value.rgb;
+    if (any(color != color) || any(abs(color) > 1e30))
+        return float3(1, 0, 1);
+    if (gWater.shaderPreview.z >= 0)
+        color = float3(value[uint(gWater.shaderPreview.z)], value[uint(gWater.shaderPreview.z)],
+                       value[uint(gWater.shaderPreview.z)]);
+    return saturate((color - gWater.shaderPreview.x) / max(.000001, gWater.shaderPreview.y - gWater.shaderPreview.x));
+}
+#else
+#define SHADER_PREVIEW_BEGIN()
+#define SHADER_PREVIEW_END(color, position)
+#endif
+#endif

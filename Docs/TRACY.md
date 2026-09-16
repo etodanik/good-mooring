@@ -103,6 +103,7 @@ It prints inclusive zone totals. Parent and child totals overlap.
 The optional DDS output contains an actual thumbnail from the capture.
 The `.tracy` file remains compatible with the official GUI.
 Add `--messages` to print recorded logs, including rejected GPU timestamp details.
+Add `--gpu-stages` to require render-stage timings and validate their parent intervals and ordering.
 
 To investigate transient corruption, record with `--tracy-images=1` and export every thumbnail:
 
@@ -129,7 +130,7 @@ This check compares all three frames of each paused diagnostic. It excludes the 
 | Simulation | Commands, crew travel, vessel forces, fixed steps, snapshot work, Jolt external profiling and named Flecs systems |
 | Ocean | Spectrum configuration, CPU FFTs, uploads, GPU FFTs, local waves, whitewater, particles, sky, geometry, scattering and composite passes |
 | Graphics | Renderer and resource lifetime, descriptors, pipeline creation, command encoding, draw/dispatch sizes, barriers, transfers, submission and presentation |
-| GPU timeline | Graphics, upload and copy queues, encoder intervals and original CPU encoding timestamps |
+| GPU timeline | Graphics, upload and copy queues, encoder intervals, vertex and fragment stages, and original CPU encoding timestamps |
 | Threads | Forge thread names, mutex ownership and contention, recursion, try-locks, condition waits, joins, sleeps and task boundaries |
 | Files | Open, mapping, read/write byte counts, seek, flush and close |
 | Frames | Render frame boundaries and independent 60 Hz physics intervals |
@@ -141,6 +142,22 @@ The Forge CPU profiler bridge retains existing named scopes, including font and 
 The native GPU bridge uses encoder boundaries. It does not split encoders or insert barriers to time individual draws or dispatches.
 CPU zones identify individual encoding calls. Encoder names identify passes or the pipelines within each encoder.
 
+Each render encoder includes `Vertex` and `Fragment` child zones when its stage timestamps are valid.
+For example, `Surface / HDR copy + Ocean surface + Foam and spray` retains its total duration and includes both children.
+These children measure all vertex work and all fragment work within that encoder.
+They do not assign separate GPU durations to its individual draws.
+Their CPU intervals describe the same encoder submission work.
+
+The encoder interval runs from the vertex start to the fragment end, including any gap between stages.
+Parent and child totals overlap, so their sum is not a frame duration.
+Invalid stage timestamps omit the children but retain a valid encoder interval.
+Compute and transfer encoders retain their existing timers.
+
+The Surface encoder includes the HDR copy, ocean surface, and foam and spray.
+Bloom runs in three existing post-processing encoders, named `Post / Bloom level 0` through `Post / Bloom level 2`.
+The atmospheric pass uses `Post / Atmospheric integration`.
+These labels distinguish the operating modes of the shared post-processing pipeline.
+
 The Metal bridge resolves completed command buffers through their existing lifecycle.
 It retains sample buffers until collection and discards results from an earlier connection.
 Each queue publishes completed intervals in submission order, including work encoded on different threads.
@@ -149,8 +166,62 @@ Empty or invalid timestamps never become synthetic durations.
 
 On the validated M3 Max, a second timestamp attachment prevented Forge from receiving its samples.
 The bridge therefore shares Forge samples when present and supplies its own samples otherwise.
+Render encoders use four timestamp slots. The bridge adds no encoder boundaries, synchronization barriers, or GPU waits for stage timings.
 The implementation follows the [Tracy Metal event layout](https://github.com/wolfpld/tracy/blob/v0.14.1/public/tracy/TracyMetal.hmm).
 Its thread-independent contexts permit resource workers and the main thread to encode work for the same queue.
+
+## Deeper shader profiling in Xcode
+
+The [Metal debugger](https://developer.apple.com/documentation/xcode/optimizing-gpu-performance) provides pipeline costs, GPU counters, and shader profiling within a captured frame.
+This workflow does not require changes to the rendering groups.
+The [capture guide](https://developer.apple.com/documentation/xcode/capturing-a-metal-workload-in-xcode) describes the scheme configuration and capture controls.
+
+Debug builds include shader line tables and embedded source code through FSL `--debug`.
+The Metal compiler retains its normal optimization settings.
+Other build configurations omit shader debug information.
+Each configuration uses a separate resource directory and shader cache under `generated/<configuration>/`.
+
+### Launch an existing Debug build
+
+1. Build the `MooringSimulator` target in Debug with CMake or CLion.
+2. In Xcode, choose **Debug > Debug Executable…**.
+3. Select the built `MooringSimulator.app` bundle.
+4. In the scheme editor, open **Run > Options** and set **GPU Frame Capture** to **Metal**.
+5. In **Run > Arguments**, add any scene arguments for the capture.
+6. Choose **Product > Run** (`⌘R`).
+7. In the debug bar, click **Capture GPU Frame**.
+8. Enable **Profile after Replay** in the advanced capture options.
+9. Capture one frame after the scene reaches the state you want to inspect.
+
+For the default CLion build, the app is `cmake-build-debug/MooringSimulator.app`.
+This workflow does not require an Xcode project.
+An existing generated Xcode project also works with the `MooringSimulator` scheme and its Debug Run configuration.
+The generated scheme enables Metal frame capture.
+The `MooringProfile` target runs the Tracy benchmark and exits automatically.
+
+### Inspect the frame
+
+1. Select the Surface encoder in the performance timeline.
+2. Compare the ocean and spray pipeline costs.
+3. Inspect the expensive shader with the shader cost graph and pipeline statistics.
+4. Export the capture as a `.gputrace` file with **Embed performance data** enabled.
+
+The captured pipeline costs help identify expensive shaders. Some detailed counters measure work in isolation during replay.
+Those measurements do not divide the live Tracy encoder duration into additive draw timings.
+
+The generated Debug Metal sources reside under `generated/Debug/shaders/MACOS` in the build directory.
+The app bundle includes the compiled shaders and their embedded sources under `Contents/Resources/Shaders/MACOS`.
+
+### Inspect frame pacing in Instruments
+
+The [Game Performance template](https://developer.apple.com/documentation/xcode/analyzing-the-performance-of-your-metal-app) includes Metal System Trace and CPU scheduling data.
+
+1. Open Instruments and choose **Game Performance** or **Metal System Trace**.
+2. Select the built app as the target.
+3. Click **Record** to launch the app and collect a trace.
+
+In a generated Xcode project, **Product > Profile** (`⌘I`) opens Instruments.
+That action uses the scheme's Profile build configuration, which defaults to Release.
 
 ## Memory interpretation
 
@@ -188,6 +259,8 @@ build/tracy-tools/mooring-tracy-inspect build/locks.tracy --clean-memory
 ```
 
 The tests cover concurrent address reuse, reallocations, alignment, recursive locks, successful and failed try-locks, and condition wakeups and timeouts.
+Stage validation covers shared Forge samples and the sample buffer owned by Tracy.
+The inspector checks parent containment, matching endpoints, and vertex/fragment ordering with `--gpu-stages`.
 An assertion-enabled capture tool also checks Tracy's event protocol. Build the tools with `CMAKE_BUILD_TYPE=Debug` for this check.
 The integration supplies a wait/obtain pair for successful try-locks, as required by the 0.14.1 debug validator.
 

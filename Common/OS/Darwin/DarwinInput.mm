@@ -31,6 +31,7 @@
 
 #if !defined(TARGET_IOS)
 #import <Cocoa/Cocoa.h>
+#import <Carbon/Carbon.h>
 #endif
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
@@ -784,16 +785,21 @@ void platformExitInput()
 }
 
 #if !defined(ENABLE_FORGE_TOUCH_INPUT)
-static bool    gAppKitButtons[3];
-static bool    gAppKitPresses[3];
-static float   gAppKitScroll;
-static NSPoint gAppKitCursor;
-static bool    gAppKitCursorValid;
-void           platformMousePosition(float x, float y)
+static bool              gAppKitButtons[3];
+static bool              gAppKitPresses[3];
+static float             gAppKitScroll;
+static NSPoint           gAppKitCursor;
+static bool              gAppKitCursorValid;
+static const TFInputEnum gAppKitShortcutKeys[] = { K_F1, K_F2, K_F3, K_F4, K_F5, K_F10 };
+static const unsigned    gAppKitShortcutKeyCodes[] = { kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F10 };
+static bool              gAppKitShortcutDown[6], gAppKitShortcutPresses[6];
+static bool              gAppKitControlDown, gAppKitShortcutControl;
+void                     platformMousePosition(float x, float y)
 {
     gAppKitCursor = NSMakePoint(x, y);
     gAppKitCursorValid = true;
 }
+void platformResetPointerPosition() { gAppKitCursorValid = false; }
 void platformMouseButton(unsigned button, bool down)
 {
     if (button >= 3)
@@ -802,23 +808,48 @@ void platformMouseButton(unsigned button, bool down)
     gAppKitPresses[button] |= down;
 }
 void platformMouseScroll(float delta) { gAppKitScroll += delta; }
+void platformKeyModifiers(bool control) { gAppKitControlDown = control; }
+bool platformIsShortcutKey(unsigned code)
+{
+    for (unsigned shortcut : gAppKitShortcutKeyCodes)
+        if (code == shortcut)
+            return true;
+    return false;
+}
+void platformResetShortcutKeys()
+{
+    for (unsigned index = 0; index < TF_ARRAY_COUNT(gAppKitShortcutKeys); ++index)
+    {
+        gAppKitShortcutDown[index] = gAppKitShortcutPresses[index] = false;
+        gInputValues[gAppKitShortcutKeys[index]] = 0;
+    }
+    gAppKitControlDown = gAppKitShortcutControl = false;
+    gInputValues[K_LCTRL] = gInputValues[K_RCTRL] = 0;
+}
 void platformKeyButton(unsigned code, bool down)
 {
-    // AppKit virtual key codes for the prototype's controls. Other keys retain
-    // the GameController mapping used by Forge.
+    // Latch quick AppKit shortcuts, including their modifier at key-down.
+    for (unsigned index = 0; index < TF_ARRAY_COUNT(gAppKitShortcutKeyCodes); ++index)
+        if (code == gAppKitShortcutKeyCodes[index])
+        {
+            gAppKitShortcutDown[index] = down;
+            gAppKitShortcutPresses[index] |= down;
+            gAppKitShortcutControl |= down && gAppKitControlDown;
+            return;
+        }
     TFInputEnum key;
     switch (code)
     {
-    case 0:
+    case kVK_ANSI_A:
         key = K_A;
         break;
-    case 1:
+    case kVK_ANSI_S:
         key = K_S;
         break;
-    case 2:
+    case kVK_ANSI_D:
         key = K_D;
         break;
-    case 13:
+    case kVK_ANSI_W:
         key = K_W;
         break;
     default:
@@ -846,13 +877,20 @@ void platformUpdateInput(uint32_t width, uint32_t height, float dt)
     ProcessTouchEvents(width, height, dt);
     CGPoint cursor = { (float)gCursorPos[0], (float)gCursorPos[1] };
 #else
-    // Mouse position relative to window
-    NSPoint cursor = [pMainView.window mouseLocationOutsideOfEventStream];
-    cursor.y = pMainView.bounds.size.height - cursor.y;
-    cursor.x *= [pMainView.window backingScaleFactor];
-    cursor.y *= [pMainView.window backingScaleFactor];
-    if (gAppKitCursorValid)
-        cursor = gAppKitCursor;
+    for (unsigned index = 0; index < TF_ARRAY_COUNT(gAppKitShortcutKeys); ++index)
+    {
+        gInputValues[gAppKitShortcutKeys[index]] = gAppKitShortcutDown[index] || gAppKitShortcutPresses[index];
+        gAppKitShortcutPresses[index] = false;
+    }
+    gInputValues[K_LCTRL] = gAppKitControlDown || gAppKitShortcutControl;
+    gInputValues[K_RCTRL] = 0;
+    gAppKitShortcutControl = false;
+    // Events and polling share the same window-to-view conversion, including fullscreen.
+    const NSPoint windowCursor = gAppKitCursorValid ? gAppKitCursor : [pMainView.window mouseLocationOutsideOfEventStream];
+    const NSPoint localCursor = [pMainView convertPoint:windowCursor fromView:nil];
+    const NSRect  bounds = pMainView.bounds;
+    const CGFloat scale = pMainView.window.backingScaleFactor;
+    const NSPoint cursor = NSMakePoint((localCursor.x - NSMinX(bounds)) * scale, (NSMaxY(bounds) - localCursor.y) * scale);
 #endif
     gInputValues[MOUSE_X] = cursor.x;
     gInputValues[MOUSE_Y] = cursor.y;

@@ -1,35 +1,47 @@
 #include "Water.srt.h"
 #include "WaterSampling.h.fsl"
+
+#define WATER_GRID_SIZE_METERS      256.0
+#define WATER_GRID_HALF_SIZE_METERS 128.0
+#define WATER_GRID_OUTER_EXPANSION  32
+#define WATER_GRID_OUTER_DERIVATIVE 352
+
 STRUCT(WaterFragment)
 {
     DATA(float4, position, SV_Position);
     DATA(float3, world, TEXCOORD0);
     DATA(float2, coordinate, TEXCOORD1);
 };
+
 WaterFragment waterVertex(uint vertexIndex)
 {
-    uint grid=uint(gWater.surface.y);
-    uint x=vertexIndex%(grid+1), y=vertexIndex/(grid+1);
-    float2 q=(float2(x,y)-float(grid)*.5)*256.0/float(grid);
-    float radius=max(abs(q.x),abs(q.y))/128.0;
+    uint grid = uint(gWater.surface.y);
+    uint column = vertexIndex % (grid + 1);
+    uint row = vertexIndex / (grid + 1);
+    float2 gridPosition = (float2(column, row) - float(grid) * .5) * WATER_GRID_SIZE_METERS / float(grid);
+    float radius = max(abs(gridPosition.x), abs(gridPosition.y)) / WATER_GRID_HALF_SIZE_METERS;
     // Keep both the viewer's foreground and the vessel in the dense region.
     // The former quadratic expansion coarsened water beneath a low camera
     // into metre-wide faces while its normals still showed centimetre ripples.
-    float r2=radius*radius, r4=r2*r2, r10=r4*r4*r2;
-    float2 centre=(gWater.origin.xz+gWater.eye.xz)*.5;
-    float2 location=q*(gWater.surface.z+.75*r4+32*r10)+centre;
-    float edge=(gWater.surface.z+3.75*r4+352*r10)*256.0/float(grid);
-    float3 displacement=float3(0,0,0);
-    for(uint band=0;band<3;band++)
+    float radiusSquared = radius * radius;
+    float radiusFourth = radiusSquared * radiusSquared;
+    float radiusTenth = radiusFourth * radiusFourth * radiusSquared;
+    float2 centre = (gWater.origin.xz + gWater.eye.xz) * .5;
+    float2 location =
+        gridPosition * (gWater.surface.z + .75 * radiusFourth + WATER_GRID_OUTER_EXPANSION * radiusTenth) + centre;
+    float edge = (gWater.surface.z + 3.75 * radiusFourth + WATER_GRID_OUTER_DERIVATIVE * radiusTenth) *
+                 WATER_GRID_SIZE_METERS / float(grid);
+    float3 displacement = float3(0, 0, 0);
+    for (uint band = 0; band < 3; band++)
     {
-        float4 sample=sampleWater(location,band,edge*1.5,false);
-        displacement+=sample.xyz;
+        float4 sample = sampleWater(location, band, edge * 1.5, false);
+        displacement += sample.xyz;
     }
-    float4 local=localWater(location+displacement.xz);
-    displacement.y+=local.x;
+    float4 local = localWater(location + displacement.xz);
+    displacement.y += local.x;
     WaterFragment result;
-    result.coordinate=location;
-    result.world=float3(location.x,gWater.surface.w,location.y)+displacement;
-    result.position=mul(gWater.viewProjection,float4(result.world,1));
+    result.coordinate = location;
+    result.world = float3(location.x, gWater.surface.w, location.y) + displacement;
+    result.position = mul(gWater.viewProjection, float4(result.world, 1));
     return result;
 }

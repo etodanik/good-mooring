@@ -1,0 +1,42 @@
+#include "Water.srt.h"
+#include "ShaderPreview.h.fsl"
+
+float previewHalf(uint bits)
+{
+    uint exponent = (bits >> 10) & 31u;
+    uint mantissa = bits & 1023u;
+    float value = exponent == 0    ? float(mantissa) * (1.0 / 16777216.0)
+                  : exponent == 31 ? asfloat(0x7f800000u | (mantissa << 13))
+                                   : (1 + float(mantissa) / 1024) * exp2(float(exponent) - 15);
+    return (bits & 32768u) != 0 ? -value : value;
+}
+
+float4 PS_MAIN(ShaderLabFragment input): SV_Target0
+{
+    INIT_MAIN;
+    float4 value = float4(0, 0, 0, 0);
+    if (gShaderLab.settings.w == 1)
+    {
+        uint2 location = uint2(max(float2(0, 0), shaderPreviewCoordinate(input.uv).xy));
+        uint element = location.y * gShaderLab.bufferLayout.y + location.x;
+        if (location.x < gShaderLab.bufferLayout.y && element < gShaderLab.bufferLayout.w)
+        {
+            uint first = gShaderLab.bufferLayout.x + element * gShaderLab.bufferLayout.z;
+            for (uint component = 0; component < uint(gShaderLab.texture.w); ++component)
+            {
+                uint word = gPreviewBuffer[first + (gShaderLab.texture.z == 1 ? component / 2 : component)];
+                value[component] = gShaderLab.texture.z == 1   ? previewHalf((word >> ((component % 2) * 16)) & 65535u)
+                                   : gShaderLab.texture.z == 2 ? float(word)
+                                                               : asfloat(word);
+            }
+        }
+    }
+    else if (gShaderLab.settings.w == 2)
+        value = SampleLvlTex2D(gPreviewTexture, gSamplerPointClamp, shaderPreviewCoordinate(input.uv).xy,
+                               gShaderLab.texture.x);
+    else if (gShaderLab.settings.w == 3)
+        value =
+            SampleLvlTex3D(gPreviewVolume, gSamplerPointClamp, shaderPreviewCoordinate(input.uv), gShaderLab.texture.x);
+    shaderPreviewStore(input.position.xy, value);
+    RETURN(float4(shaderPreviewDisplay(value), 1));
+}

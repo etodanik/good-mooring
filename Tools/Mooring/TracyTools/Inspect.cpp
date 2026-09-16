@@ -59,7 +59,8 @@ void cpu(const tracy::Worker& w, const tracy::Vector<tracy::short_ptr<tracy::Zon
                  cpu(w, w.GetZoneChildren(e.Child()), totals, open);
          });
 }
-void gpu(const tracy::Worker& w, const tracy::Vector<tracy::short_ptr<tracy::GpuEvent>>& v, Zones& totals, uint64_t& invalid)
+void gpu(const tracy::Worker& w, const tracy::Vector<tracy::short_ptr<tracy::GpuEvent>>& v, Zones& totals, uint64_t& invalid,
+         uint64_t& stagePairs)
 {
     each(v,
          [&](const auto& e)
@@ -71,7 +72,30 @@ void gpu(const tracy::Worker& w, const tracy::Vector<tracy::short_ptr<tracy::Gpu
              else
                  ++invalid;
              if (e.Child() >= 0)
-                 gpu(w, w.GetGpuChildren(e.Child()), totals, invalid);
+             {
+                 const auto&            children = w.GetGpuChildren(e.Child());
+                 const tracy::GpuEvent *vertex = nullptr, *fragment = nullptr;
+                 const std::string      name = w.GetZoneName(e);
+                 each(children,
+                      [&](const auto& child)
+                      {
+                          if (child.GpuStart() < e.GpuStart() || child.GpuEnd() > e.GpuEnd())
+                              ++invalid;
+                          if (name + " / Vertex" == w.GetZoneName(child))
+                              vertex = &child;
+                          if (name + " / Fragment" == w.GetZoneName(child))
+                              fragment = &child;
+                      });
+                 if (vertex || fragment)
+                 {
+                     if (vertex && fragment && children.size() == 2 && vertex->GpuStart() == e.GpuStart() &&
+                         vertex->GpuEnd() <= fragment->GpuStart() && fragment->GpuEnd() == e.GpuEnd())
+                         ++stagePairs;
+                     else
+                         ++invalid;
+                 }
+                 gpu(w, children, totals, invalid, stagePairs);
+             }
          });
 }
 int main(int argc, char** argv)
@@ -79,10 +103,10 @@ int main(int argc, char** argv)
     if (argc < 2)
     {
         fprintf(stderr, "Usage: mooring-tracy-inspect capture.tracy [thumbnail.dds] [--app] [--images] [--images-dir=PATH] [--messages] "
-                        "[--clean-memory]\n");
+                        "[--clean-memory] [--gpu-stages]\n");
         return 2;
     }
-    bool        requireApp = false, requireImages = false, cleanMemory = false, messages = false;
+    bool        requireApp = false, requireImages = false, cleanMemory = false, messages = false, requireStages = false;
     const char* thumbnail = nullptr;
     const char* imageDirectory = nullptr;
     for (int i = 2; i < argc; ++i)
@@ -95,6 +119,8 @@ int main(int argc, char** argv)
             cleanMemory = true;
         else if (strcmp(argv[i], "--messages") == 0)
             messages = true;
+        else if (strcmp(argv[i], "--gpu-stages") == 0)
+            requireStages = true;
         else if (strncmp(argv[i], "--images-dir=", 13) == 0)
             imageDirectory = argv[i] + 13;
         else if (!thumbnail && argv[i][0] != '-')
@@ -120,7 +146,7 @@ int main(int argc, char** argv)
                 printf("Message [%lld, severity %u]: %s\n", (long long)message->time, unsigned(message->severity),
                        w.GetString(message->ref));
         Zones    cpuTotals, gpuTotals;
-        uint64_t open = 0, invalid = 0;
+        uint64_t open = 0, invalid = 0, stagePairs = 0;
         for (const auto& thread : w.GetThreadData())
         {
             printf("Thread [%s]: %llu zones\n", w.GetThreadName(thread->id), (unsigned long long)thread->count);
@@ -130,9 +156,10 @@ int main(int argc, char** argv)
         {
             printf("GPU [%s]: %llu zones\n", w.GetString(context->name), (unsigned long long)context->count);
             for (const auto& thread : context->threadData)
-                gpu(w, thread.second.timeline, gpuTotals, invalid);
+                gpu(w, thread.second.timeline, gpuTotals, invalid, stagePairs);
         }
         printf("Open CPU zones: %llu\nInvalid GPU timings: %llu\n", (unsigned long long)open, (unsigned long long)invalid);
+        printf("GPU render stage pairs: %llu\n", (unsigned long long)stagePairs);
         bool memoryBalanced = true;
         for (const auto& pool : w.GetMemNameMap())
         {
@@ -175,8 +202,8 @@ int main(int argc, char** argv)
         const bool app = !requireApp || (cpuTotals.count("Update") && cpuTotals.count("Draw") && cpuTotals.count("Physics fixed step") &&
                                          cpuTotals.count("Vessel forces") && w.GetGpuZoneCount() > 0 && !w.GetPlots().empty() &&
                                          !w.GetSections().empty() && !w.GetLockMap().empty() && w.GetMemNameMap().size() >= 5);
-        const bool valid =
-            !invalid && w.GetZoneCount() > 0 && app && (!requireImages || w.GetFrameImageCount() > 0) && (!cleanMemory || memoryBalanced);
+        const bool valid = !invalid && w.GetZoneCount() > 0 && app && (!requireImages || w.GetFrameImageCount() > 0) &&
+                           (!cleanMemory || memoryBalanced) && (!requireStages || stagePairs > 0);
         printf("Capture validation: %s\n", valid ? "PASS" : "FAIL");
         return valid ? 0 : 1;
     }

@@ -2,8 +2,9 @@ STRUCT(WaterLightFragment)
 {
     DATA(float4, position, SV_Position);
 };
+
 float4 PS_MAIN(WaterLightFragment input)
 {
     INIT_MAIN;
-    RETURN(float4(input.position.z,0,0,1));
+    RETURN(float4(input.position.z, 0, 0, 1));
 }
