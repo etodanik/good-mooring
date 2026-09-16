@@ -405,7 +405,7 @@ FORGE_API TFUIWidgetInteraction uiGradientColor3Button(TFUIGradientColor* gradie
 FORGE_API TFUIWidgetInteraction uiGradientColor4Button(TFUIGradientColor* gradientData);
 FORGE_API float4                uiGetGradientColor(TFUIGradientColor* gradientData, float value);
 FORGE_API void                  uiSortGradient(TFUIGradientColor* gradientData);
-FORGE_API TFUIWidgetInteraction uiTextbox(const char* label, bstring* text, TFUIWidgetEditFilter textFilter);
+FORGE_API TFUIWidgetInteraction uiTextbox(const char* label, bstring* text, TFUIWidgetEditFilter textFilter, bool multiline = true);
 FORGE_API TFUIWidgetInteraction uiDynamicText(bstring* text, float4 rgbaColor, TFUITextMode mode, TFUIAlignmentText alignment);
 FORGE_API TFUIWidgetInteraction uiFilledRect(float4 rgbaColor, float rounding);
 FORGE_API TFUIWidgetInteraction uiTooltipText(const char* text);
@@ -687,6 +687,8 @@ FORGE_API float4 uiLayoutPeek();
 // Automatically layouts a provided number of widgets within a row. Supports auto repeat.
 FORGE_API void uiLayoutAutoRows(int colsPerRow);
 FORGE_API void uiLayoutAutoTextRows(int colsPerRow);
+// Includes the editor's padding and border around one line of text.
+FORGE_API void uiLayoutAutoTextboxRows(int colsPerRow);
 FORGE_API void uiLayoutDynamicRows(float rowHeight, int colsPerRow);
 FORGE_API void uiLayoutDynamicTextRows(float rowHeight, int colsPerRow);
 FORGE_API void uiLayoutSetMinRowHeight(float minHeight);

@@ -2863,7 +2863,7 @@ static nk_plugin_filter getNkFilter(TFUIWidgetEditFilter textFilter)
     }
 }
 
-TFUIWidgetInteraction uiTextbox(const char* label, bstring* text, TFUIWidgetEditFilter textFilter)
+TFUIWidgetInteraction uiTextbox(const char* label, bstring* text, TFUIWidgetEditFilter textFilter, bool multiline)
 {
     ASSERT(text);
     ASSERT(bcapacity(text));
@@ -2873,8 +2873,8 @@ TFUIWidgetInteraction uiTextbox(const char* label, bstring* text, TFUIWidgetEdit
     result.type = TF_WIDGET_INTERACTION_EDIT_EVENTS;
 
     nk_label(getContext(), label, NK_TEXT_LEFT);
-    result.editEvents =
-        nk_edit_string(getContext(), NK_EDIT_BOX, (char*)text->data, &text->slen, bcapacity(text) - 1, getNkFilter(textFilter));
+    const nk_flags flags = multiline ? NK_EDIT_BOX : NK_EDIT_FIELD;
+    result.editEvents = nk_edit_string(getContext(), flags, (char*)text->data, &text->slen, bcapacity(text) - 1, getNkFilter(textFilter));
     bdata(text)[blength(text)] = 0;
 
     result.id = getWidgetId(updateLastWidget(label, TF_WIDGET_TYPE_TEXTBOX));
@@ -5976,6 +5976,12 @@ void uiLayoutAutoRows(int colsPerRow) { uiLayoutDynamicRows(DEFAULT_ROW_HEIGHT, 
 
 void uiLayoutAutoTextRows(int colsPerRow) { uiLayoutDynamicTextRows(DEFAULT_ROW_HEIGHT, colsPerRow); }
 
+void uiLayoutAutoTextboxRows(int colsPerRow)
+{
+    const nk_style& style = getContext()->style;
+    uiLayoutDynamicRows(NK_MAX(DEFAULT_ROW_HEIGHT, style.font->height + 2 * (style.edit.padding.y + style.edit.border)), colsPerRow);
+}
+
 void uiLayoutDynamicRows(float rowHeight, int colsPerRow) { nk_layout_row_dynamic(getContext(), rowHeight, colsPerRow); }
 
 void uiLayoutDynamicTextRows(float rowHeight, int colsPerRow) { uiLayoutDynamicRows(uiCalculateHeightOfTextRows(rowHeight), colsPerRow); }
@@ -8576,7 +8582,7 @@ uiKeyPaste; button; K_V; single; cond; K_LCTRL; pressed
 uiKeyUp; button; K_UPARROW; repeat
 uiKeyDown; button; K_DOWNARROW; repeat
 uiKeyLeft; button; K_LEFTARROW; repeat
-uiKeyRight; button; K_RIGHTARROW; repeat)
+uiKeyRight; button; K_RIGHTARROW; repeat
 uiHideUI; button; K_F1; single)"
                            /* text shortcuts */
                            R"(

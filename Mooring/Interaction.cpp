@@ -273,8 +273,7 @@ static FooterLayout footerLayout(const Interaction& ui, unsigned width)
     layout.height = 2 * (padding.y + WindowBorder) + (commandRows + counterRows + helmRows) * (layout.rowHeight + spacing);
     return layout;
 }
-static float footerHeight(const Interaction& ui, unsigned width) { return footerLayout(ui, width).height; }
-static void  drawFooter(Interaction& ui, unsigned width, unsigned height)
+static void drawFooter(Interaction& ui, unsigned width, unsigned height)
 {
     const FooterLayout layout = footerLayout(ui, width);
     const float        barHeight = layout.height;
@@ -370,7 +369,7 @@ void updateInteraction(Interaction& ui, float dt, unsigned width, unsigned heigh
     updateCamera(ui.camera, dt);
     if (ui.showUI)
     {
-        const unsigned usableHeight = unsigned(std::max(1.0f, height - footerHeight(ui, width)));
+        const unsigned usableHeight = unsigned(std::max(1.0f, height - footerLayout(ui, width).height));
         drawSkipper(ui, width, usableHeight);
         drawSession(ui, width, usableHeight);
         drawSeaLab(ui.seaLab, ui.world, ui.camera, width, usableHeight);
@@ -390,28 +389,28 @@ void updateInteraction(Interaction& ui, float dt, unsigned width, unsigned heigh
             for (unsigned engine = 0; engine < (ui.catamaran ? 2u : 1u); ++engine)
                 command(ui, CommandType::Throttle, state.throttle[engine] + throttleInput * dt * .3f, engine);
     }
-    float x = inputGetValue(0, MOUSE_X), y = inputGetValue(0, MOUSE_Y);
+    float pointerX = inputGetValue(0, MOUSE_X), pointerY = inputGetValue(0, MOUSE_Y);
     bool  down = inputGetValue(0, MOUSE_1) > 0;
     if (down && !ui.pointerDown && (!ui.showUI || !uiIsFocused()))
     {
         ui.pointerDown = true;
         ui.dragging = false;
-        ui.pressX = x;
-        ui.pressY = y;
-        ui.pointerX = x;
-        ui.pointerY = y;
+        ui.pressX = pointerX;
+        ui.pressY = pointerY;
+        ui.pointerX = pointerX;
+        ui.pointerY = pointerY;
     }
     if (ui.pointerDown && down)
     {
-        if (std::fabs(x - ui.pressX) + std::fabs(y - ui.pressY) > 8)
+        if (std::fabs(pointerX - ui.pressX) + std::fabs(pointerY - ui.pressY) > 8)
             ui.dragging = true;
         if (ui.dragging)
         {
-            panCamera(ui.camera, x - ui.pointerX, y - ui.pointerY);
+            panCamera(ui.camera, pointerX - ui.pointerX, pointerY - ui.pointerY);
             ui.following = false;
         }
-        ui.pointerX = x;
-        ui.pointerY = y;
+        ui.pointerX = pointerX;
+        ui.pointerY = pointerY;
     }
     if (!down && ui.pointerDown)
     {
@@ -419,16 +418,17 @@ void updateInteraction(Interaction& ui, float dt, unsigned width, unsigned heigh
         {
             Vec3    person = project(ui.camera, deckToWorld(state, state.skipperDeck));
             float   nearest = 42 * 42;
-            bool    crew = (person.x - x) * (person.x - x) + (person.y - y) * (person.y - y) < nearest;
+            bool    crew = (person.x - pointerX) * (person.x - pointerX) + (person.y - pointerY) * (person.y - pointerY) < nearest;
             Station chosen = Station::Helm;
             bool    found = false;
             for (Station station : { Station::Helm, Station::Port, Station::Starboard, Station::Bow })
             {
-                auto  p = project(ui.camera, deckToWorld(state, stationPosition(station)));
-                float d = (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y);
-                if (d < nearest)
+                auto  projectedStation = project(ui.camera, deckToWorld(state, stationPosition(station)));
+                float distanceSquared = (projectedStation.x - pointerX) * (projectedStation.x - pointerX) +
+                                        (projectedStation.y - pointerY) * (projectedStation.y - pointerY);
+                if (distanceSquared < nearest)
                 {
-                    nearest = d;
+                    nearest = distanceSquared;
                     chosen = station;
                     found = true;
                 }

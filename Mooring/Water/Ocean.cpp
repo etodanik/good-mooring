@@ -8,7 +8,7 @@
 namespace mooring
 {
 constexpr float    Pi = 3.14159265358979323846f;
-constexpr unsigned N = OceanSpectrumSize, Cells = N * N;
+constexpr unsigned Cells = OceanSpectrumSize * OceanSpectrumSize;
 static uint32_t    generation;
 struct Surface
 {
@@ -20,7 +20,7 @@ struct Ocean
     SpectrumMode modes[OceanModeCount];
     Surface      surface[OceanModeCount];
     float        orbitalFactor[OceanModeCount];
-    Complex      height[Cells], derivative[Cells], work[Cells], scratch[Cells], twiddles[N / 2];
+    Complex      height[Cells], derivative[Cells], work[Cells], scratch[Cells], twiddles[OceanSpectrumSize / 2];
     float        representativeK[OceanBands];
     OceanMetrics metrics;
     WavePacket   packets[MaxWavePackets];
@@ -31,50 +31,58 @@ struct Ocean
     uint32_t     revision;
     double       time;
 };
-static Complex add(Complex a, Complex b) { return { a.real + b.real, a.imaginary + b.imaginary }; }
-static Complex sub(Complex a, Complex b) { return { a.real - b.real, a.imaginary - b.imaginary }; }
-static Complex mul(Complex a, Complex b)
+static Complex add(Complex left, Complex right) { return { left.real + right.real, left.imaginary + right.imaginary }; }
+static Complex sub(Complex left, Complex right) { return { left.real - right.real, left.imaginary - right.imaginary }; }
+static Complex mul(Complex left, Complex right)
 {
-    return { a.real * b.real - a.imaginary * b.imaginary, a.real * b.imaginary + a.imaginary * b.real };
+    return { left.real * right.real - left.imaginary * right.imaginary, left.real * right.imaginary + left.imaginary * right.real };
 }
-static Complex  scale(Complex a, float s) { return { a.real * s, a.imaginary * s }; }
-static Complex  timesI(Complex a) { return { -a.imaginary, a.real }; }
-static unsigned mirror(unsigned x, unsigned y) { return ((N - y) % N) * N + (N - x) % N; }
-static int      signedIndex(unsigned i) { return i < N / 2 ? int(i) : int(i) - int(N); }
-float           dispersion(float k, float depth) { return std::sqrt(9.81f * k * std::tanh(k * depth)); }
-float           groupVelocity(float k, float depth)
+static Complex  scale(Complex value, float factor) { return { value.real * factor, value.imaginary * factor }; }
+static Complex  timesI(Complex value) { return { -value.imaginary, value.real }; }
+static unsigned mirror(unsigned column, unsigned row)
 {
-    if (k < 1e-6f)
-        return std::sqrt(9.81f * depth);
-    const float t = std::tanh(k * depth), omega = dispersion(k, depth);
-    return 9.81f * (t + k * depth * (1 - t * t)) / (2 * omega);
+    return ((OceanSpectrumSize - row) % OceanSpectrumSize) * OceanSpectrumSize + (OceanSpectrumSize - column) % OceanSpectrumSize;
+}
+static int signedIndex(unsigned sampleIndex)
+{
+    return sampleIndex < OceanSpectrumSize / 2 ? int(sampleIndex) : int(sampleIndex) - int(OceanSpectrumSize);
+}
+float dispersion(float waveNumber, float depth) { return std::sqrt(Gravity * waveNumber * std::tanh(waveNumber * depth)); }
+float groupVelocity(float waveNumber, float depth)
+{
+    if (waveNumber < 1e-6f)
+        return std::sqrt(Gravity * depth);
+    const float depthFactor = std::tanh(waveNumber * depth), omega = dispersion(waveNumber, depth);
+    return Gravity * (depthFactor + waveNumber * depth * (1 - depthFactor * depthFactor)) / (2 * omega);
 }
 float wakeWavelength(float phaseSpeed, float depth)
 {
-    if (phaseSpeed <= 0 || phaseSpeed * phaseSpeed >= 9.81f * depth)
+    if (phaseSpeed <= 0 || phaseSpeed * phaseSpeed >= Gravity * depth)
         return 0;
     // omega/k = U cos(theta), with finite-depth dispersion. At the critical
     // depth speed this direction has no stationary gravity-wave solution.
-    float low = 0, high = 9.81f / (phaseSpeed * phaseSpeed);
-    for (unsigned i = 0; i < 24; ++i)
+    float low = 0, high = Gravity / (phaseSpeed * phaseSpeed);
+    for (unsigned iteration = 0; iteration < 24; ++iteration)
     {
-        float k = (low + high) * .5f;
-        if (9.81f * std::tanh(k * depth) > k * phaseSpeed * phaseSpeed)
-            low = k;
+        float waveNumber = (low + high) * .5f;
+        if (Gravity * std::tanh(waveNumber * depth) > waveNumber * phaseSpeed * phaseSpeed)
+            low = waveNumber;
         else
-            high = k;
+            high = waveNumber;
     }
     return 2 * Pi / ((low + high) * .5f);
 }
-Vec3 orbitalAttenuation(float k, float waterDepth, float below)
+Vec3 orbitalAttenuation(float waveNumber, float waterDepth, float below)
 {
-    float h = std::max(.001f, waterDepth), z = std::clamp(below, 0.0f, h);
-    if (k < 1e-6f)
-        return { 1, 1 - z / h, 1 };
+    float clampedDepth = std::max(.001f, waterDepth), depthBelowSurface = std::clamp(below, 0.0f, clampedDepth);
+    if (waveNumber < 1e-6f)
+        return { 1, 1 - depthBelowSurface / clampedDepth, 1 };
     // cosh[k(h-z)]/cosh(kh), sinh[k(h-z)]/sinh(kh), expressed
     // without overflowing exponentials. No vertical flow through the bottom.
-    float horizontal = std::exp(-k * z) * (1 + std::exp(-2 * k * (h - z))) / (1 + std::exp(-2 * k * h));
-    float vertical = std::exp(-k * z) * std::expm1(-2 * k * (h - z)) / std::expm1(-2 * k * h);
+    float horizontal = std::exp(-waveNumber * depthBelowSurface) * (1 + std::exp(-2 * waveNumber * (clampedDepth - depthBelowSurface))) /
+                       (1 + std::exp(-2 * waveNumber * clampedDepth));
+    float vertical = std::exp(-waveNumber * depthBelowSurface) * std::expm1(-2 * waveNumber * (clampedDepth - depthBelowSurface)) /
+                     std::expm1(-2 * waveNumber * clampedDepth);
     return { horizontal, vertical, horizontal };
 }
 void inverseFFT(Complex* data, Complex* scratch, const Complex* twiddles, unsigned size)
@@ -94,15 +102,16 @@ void inverseFFT(Complex* data, Complex* scratch, const Complex* twiddles, unsign
             for (unsigned major = 0; major < (axis ? size / 2 : size); ++major)
                 for (unsigned minor = 0; minor < (axis ? size : size / 2); ++minor)
                 {
-                    unsigned row = axis ? minor : major, j = axis ? major : minor;
-                    unsigned k = j & (stride - 1), output = 2 * (j - k) + k;
-                    unsigned a = axis ? j * size + row : row * size + j;
-                    unsigned b = axis ? (j + size / 2) * size + row : a + size / 2;
+                    unsigned row = axis ? minor : major, butterflyIndex = axis ? major : minor;
+                    unsigned butterflyOffset = butterflyIndex & (stride - 1),
+                             output = 2 * (butterflyIndex - butterflyOffset) + butterflyOffset;
+                    unsigned firstInput = axis ? butterflyIndex * size + row : row * size + butterflyIndex;
+                    unsigned secondInput = axis ? (butterflyIndex + size / 2) * size + row : firstInput + size / 2;
                     unsigned lo = axis ? output * size + row : row * size + output;
                     unsigned hi = axis ? lo + stride * size : lo + stride;
-                    Complex  rotated = mul(src[b], twiddles[k * (size / (2 * stride))]);
-                    dst[lo] = add(src[a], rotated);
-                    dst[hi] = sub(src[a], rotated);
+                    Complex  rotated = mul(src[secondInput], twiddles[butterflyOffset * (size / (2 * stride))]);
+                    dst[lo] = add(src[firstInput], rotated);
+                    dst[hi] = sub(src[firstInput], rotated);
                 }
             std::swap(src, dst);
         }
@@ -110,78 +119,81 @@ void inverseFFT(Complex* data, Complex* scratch, const Complex* twiddles, unsign
     if (src != data)
         memcpy(data, src, size * size * sizeof(Complex));
 }
-static uint32_t hash(uint32_t v)
+static uint32_t hash(uint32_t value)
 {
-    v ^= v >> 16;
-    v *= 0x7feb352du;
-    v ^= v >> 15;
-    v *= 0x846ca68bu;
-    return v ^ (v >> 16);
+    value ^= value >> 16;
+    value *= 0x7feb352du;
+    value ^= value >> 15;
+    value *= 0x846ca68bu;
+    return value ^ (value >> 16);
 }
 static float   uniform(uint32_t key) { return (float(hash(key) >> 8) + .5f) / 16777216.0f; }
 static Complex gaussian(uint32_t key)
 {
-    float r = std::sqrt(-2 * std::log(uniform(key))), phase = 2 * Pi * uniform(key ^ 0x9e3779b9u);
-    return { r * std::cos(phase), r * std::sin(phase) };
+    float radius = std::sqrt(-2 * std::log(uniform(key))), phase = 2 * Pi * uniform(key ^ 0x9e3779b9u);
+    return { radius * std::cos(phase), radius * std::sin(phase) };
 }
 void buildRippleSpectrum(const SeaState& sea, SpectrumMode* modes)
 {
     MTRACY_ZONE("buildRippleSpectrum");
     double slopeVariance = 0;
-    for (unsigned y = 0; y < N; ++y)
-        for (unsigned x = 0; x < N; ++x)
+    for (unsigned row = 0; row < OceanSpectrumSize; ++row)
+        for (unsigned column = 0; column < OceanSpectrumSize; ++column)
         {
-            unsigned i = y * N + x;
-            modes[i] = {};
-            float kx = signedIndex(x) * Pi, kz = signedIndex(y) * Pi, k = std::hypot(kx, kz);
-            if (k < 2 * Pi / .30f || k > 2 * Pi / .035f || x == N / 2 || y == N / 2)
+            unsigned sampleIndex = row * OceanSpectrumSize + column;
+            modes[sampleIndex] = {};
+            float kx = signedIndex(column) * Pi, kz = signedIndex(row) * Pi, waveNumber = std::hypot(kx, kz);
+            if (waveNumber < 2 * Pi / .30f || waveNumber > 2 * Pi / .035f || column == OceanSpectrumSize / 2 ||
+                row == OceanSpectrumSize / 2)
                 continue;
-            float alignment = (kx * std::cos(sea.windDirection) + kz * std::sin(sea.windDirection)) / k;
-            float power = std::exp(-k * k * .000025f) * (.15f + .85f * alignment * alignment) / (k * k * k * k);
-            auto  amplitude = scale(gaussian(i ^ sea.seed ^ 0xb82415afu), std::sqrt(power));
-            modes[i] = { amplitude.real, amplitude.imaginary, std::sqrt(9.81f * k + .000074f * k * k * k), k };
-            slopeVariance += 2 * (amplitude.real * amplitude.real + amplitude.imaginary * amplitude.imaginary) * k * k;
+            float alignment = (kx * std::cos(sea.windDirection) + kz * std::sin(sea.windDirection)) / waveNumber;
+            float power = std::exp(-waveNumber * waveNumber * .000025f) * (.15f + .85f * alignment * alignment) /
+                          (waveNumber * waveNumber * waveNumber * waveNumber);
+            auto amplitude = scale(gaussian(sampleIndex ^ sea.seed ^ 0xb82415afu), std::sqrt(power));
+            modes[sampleIndex] = { amplitude.real, amplitude.imaginary,
+                                   std::sqrt(Gravity * waveNumber + .000074f * waveNumber * waveNumber * waveNumber), waveNumber };
+            slopeVariance += 2 * (amplitude.real * amplitude.real + amplitude.imaginary * amplitude.imaginary) * waveNumber * waveNumber;
         }
     // Short wind ripples disappear before long swell does. A square-root wind
     // ramp left conspicuous capillary texture even in the calm preset.
     float wind = std::clamp((sea.windSpeed - .75f) / 4.25f, 0.0f, 1.0f);
     float rmsSlope = .065f * wind * wind * (3 - 2 * wind);
     float scaleFactor = slopeVariance > 0 ? rmsSlope / std::sqrt(slopeVariance) : 0;
-    for (unsigned i = 0; i < Cells; ++i)
+    for (unsigned sampleIndex = 0; sampleIndex < Cells; ++sampleIndex)
     {
-        modes[i].real *= scaleFactor;
-        modes[i].imaginary *= scaleFactor;
+        modes[sampleIndex].real *= scaleFactor;
+        modes[sampleIndex].imaginary *= scaleFactor;
     }
 }
-static float spreading(float theta, float direction, float s)
+static float spreading(float theta, float direction, float exponent)
 {
     float angle = std::remainder(theta - direction, 2 * Pi);
-    float normalization = std::exp(std::lgamma(s + 1) - std::lgamma(s + .5f)) / (2 * std::sqrt(Pi));
-    return normalization * std::pow(std::max(0.0f, std::cos(angle * .5f)), 2 * s);
+    float normalization = std::exp(std::lgamma(exponent + 1) - std::lgamma(exponent + .5f)) / (2 * std::sqrt(Pi));
+    return normalization * std::pow(std::max(0.0f, std::cos(angle * .5f)), 2 * exponent);
 }
 static float density(const SeaState& sea, float omega, float theta, bool swell)
 {
-    float peak = swell ? 2 * Pi / sea.swellPeriod : 22 * std::cbrt(9.81f * 9.81f / (std::max(.5f, sea.windSpeed) * sea.fetch));
+    float peak = swell ? 2 * Pi / sea.swellPeriod : 22 * std::cbrt(Gravity * Gravity / (std::max(.5f, sea.windSpeed) * sea.fetch));
     float ratio = omega / peak;
     if (ratio < .25f)
         return 0;
     float sigma = omega <= peak ? .07f : .09f;
-    float r = std::exp(-.5f * std::pow((omega - peak) / (sigma * peak), 2));
-    float spectrum = std::pow(omega, -5) * std::exp(-1.25f * std::pow(peak / omega, 4)) * std::pow(swell ? 5.0f : 3.3f, r);
+    float peakRatio = std::exp(-.5f * std::pow((omega - peak) / (sigma * peak), 2));
+    float spectrum = std::pow(omega, -5) * std::exp(-1.25f * std::pow(peak / omega, 4)) * std::pow(swell ? 5.0f : 3.3f, peakRatio);
     float spread = swell ? 28 : std::clamp(16 * std::pow(ratio, omega <= peak ? 5.0f : -2.5f), 1.0f, 32.0f);
     return spectrum * spreading(theta, swell ? sea.swellDirection : sea.windDirection, spread);
 }
-static Surface interpolate(const Ocean* o, unsigned band, float x, float z);
-static void    calibrateWhitecaps(Ocean* o)
+static Surface interpolate(const Ocean* ocean, unsigned band, float worldX, float worldZ);
+static void    calibrateWhitecaps(Ocean* ocean)
 {
     MTRACY_ZONE("calibrateWhitecaps");
     // Tessendorf/Reinhardt/Gao: choose a minimum-stretch threshold from the
     // realised distribution and an observed wind/whitecap relation. This is
     // configuration work; no histogram, allocation or readback runs per frame.
-    float wind = o->settings.windSpeed;
+    float wind = ocean->settings.windSpeed;
     float fraction = wind < 3 ? 0 : std::min(.35f, 3.84e-6f * std::pow(wind, 3.41f));
-    o->metrics.whitecapFraction = fraction;
-    for (auto& thresholds : o->metrics.breakingThreshold)
+    ocean->metrics.whitecapFraction = fraction;
+    for (auto& thresholds : ocean->metrics.breakingThreshold)
     {
         thresholds[0] = thresholds[2] = 0;
         thresholds[1] = -2;
@@ -196,44 +208,45 @@ static void    calibrateWhitecaps(Ocean* o)
             for (unsigned field = 0; field < 2; ++field)
             {
                 float       delta = 2 * Pi / OceanLengths[band], spacing = OceanLengths[band] / float(256u << preset);
-                const auto* modes = o->modes + band * Cells;
-                for (unsigned y = 0; y < N; ++y)
-                    for (unsigned x = 0; x < N; ++x)
+                const auto* modes = ocean->modes + band * Cells;
+                for (unsigned row = 0; row < OceanSpectrumSize; ++row)
+                    for (unsigned column = 0; column < OceanSpectrumSize; ++column)
                     {
-                        unsigned i = y * N + x;
-                        auto     a = modes[i], b = modes[mirror(x, y)];
-                        Complex  h = { a.real + b.real, a.imaginary - b.imaginary };
-                        float    kx = signedIndex(x) * delta, kz = signedIndex(y) * delta;
+                        unsigned sampleIndex = row * OceanSpectrumSize + column;
+                        auto     mode = modes[sampleIndex], mirroredMode = modes[mirror(column, row)];
+                        Complex  heightSpectrum = { mode.real + mirroredMode.real, mode.imaginary - mirroredMode.imaginary };
+                        float    kx = signedIndex(column) * delta, kz = signedIndex(row) * delta;
                         float    dx = std::sin(kx * spacing) / spacing, dz = std::sin(kz * spacing) / spacing;
-                        float    factor = -o->orbitalFactor[band * Cells + i] / delta * o->settings.choppiness;
-                        o->work[i] = field == 0 ? add(scale(h, kx * dx * factor), timesI(scale(h, kz * dz * factor)))
-                                                : scale(h, (kx * dz + kz * dx) * .5f * factor);
+                        float    factor = -ocean->orbitalFactor[band * Cells + sampleIndex] / delta * ocean->settings.choppiness;
+                        ocean->work[sampleIndex] =
+                            field == 0 ? add(scale(heightSpectrum, kx * dx * factor), timesI(scale(heightSpectrum, kz * dz * factor)))
+                                       : scale(heightSpectrum, (kx * dz + kz * dx) * .5f * factor);
                     }
-                inverseFFT(o->work, o->scratch, o->twiddles, N);
-                for (unsigned i = 0; i < Cells; ++i)
+                inverseFFT(ocean->work, ocean->scratch, ocean->twiddles, OceanSpectrumSize);
+                for (unsigned sampleIndex = 0; sampleIndex < Cells; ++sampleIndex)
                 {
-                    auto& s = o->surface[band * Cells + i];
+                    auto& sample = ocean->surface[band * Cells + sampleIndex];
                     if (field == 0)
                     {
-                        s.ax = o->work[i].real;
-                        s.ay = o->work[i].imaginary;
+                        sample.ax = ocean->work[sampleIndex].real;
+                        sample.ay = ocean->work[sampleIndex].imaginary;
                     }
                     else
-                        s.az = o->work[i].real;
+                        sample.az = ocean->work[sampleIndex].real;
                 }
             }
-        auto& thresholds = o->metrics.breakingThreshold[preset];
+        auto& thresholds = ocean->metrics.breakingThreshold[preset];
         for (unsigned band : { 0u, 2u })
         {
-            unsigned histogram[1024] = {}, size = band == 0 ? 256u << preset : N;
+            unsigned histogram[1024] = {}, size = band == 0 ? 256u << preset : OceanSpectrumSize;
             float    spacing = OceanLengths[band] / size;
-            for (unsigned y = 0; y < size; ++y)
-                for (unsigned x = 0; x < size; ++x)
+            for (unsigned row = 0; row < size; ++row)
+                for (unsigned column = 0; column < size; ++column)
                 {
-                    auto gradient = interpolate(o, band, x * spacing, y * spacing);
+                    auto gradient = interpolate(ocean, band, column * spacing, row * spacing);
                     if (band == 0)
                     {
-                        auto medium = interpolate(o, 1, x * spacing, y * spacing);
+                        auto medium = interpolate(ocean, 1, column * spacing, row * spacing);
                         gradient.ax += medium.ax;
                         gradient.ay += medium.ay;
                         gradient.az += medium.az;
@@ -255,26 +268,26 @@ static void    calibrateWhitecaps(Ocean* o)
         }
     }
 }
-void configureOcean(Ocean* o, const SeaState& settings)
+void configureOcean(Ocean* ocean, const SeaState& settings)
 {
     MTRACY_ZONE("configureOcean");
-    o->settings = settings;
-    auto& sea = o->settings;
+    ocean->settings = settings;
+    auto& sea = ocean->settings;
     sea.depth = std::max(.5f, sea.depth);
     sea.fetch = std::max(50.0f, sea.fetch);
     sea.swellPeriod = std::clamp(sea.swellPeriod, 1.5f, 18.0f);
     sea.windWaveHeight = std::max(0.0f, sea.windWaveHeight);
     sea.swellHeight = std::max(0.0f, sea.swellHeight);
     sea.choppiness = std::clamp(sea.choppiness, 0.0f, 1.0f);
-    memset(o->modes, 0, sizeof o->modes);
-    memset(o->surface, 0, sizeof o->surface);
-    o->metrics = {};
-    clearWavePackets(o);
-    o->patchCenter = {};
-    for (unsigned i = 0; i < N / 2; ++i)
+    memset(ocean->modes, 0, sizeof ocean->modes);
+    memset(ocean->surface, 0, sizeof ocean->surface);
+    ocean->metrics = {};
+    clearWavePackets(ocean);
+    ocean->patchCenter = {};
+    for (unsigned twiddleIndex = 0; twiddleIndex < OceanSpectrumSize / 2; ++twiddleIndex)
     {
-        float angle = 2 * Pi * i / N;
-        o->twiddles[i] = { std::cos(angle), std::sin(angle) };
+        float angle = 2 * Pi * twiddleIndex / OceanSpectrumSize;
+        ocean->twiddles[twiddleIndex] = { std::cos(angle), std::sin(angle) };
     }
     // Separate, non-overlapping wavelength bands preserve total spectral energy.
     // The 0.30 m cutoff is shared by all rendering presets and CPU queries.
@@ -285,248 +298,252 @@ void configureOcean(Ocean* o, const SeaState& settings)
         for (unsigned band = 0; band < OceanBands; ++band)
         {
             float delta = 2 * Pi / OceanLengths[band];
-            for (unsigned y = 0; y < N; ++y)
-                for (unsigned x = 0; x < N; ++x)
+            for (unsigned row = 0; row < OceanSpectrumSize; ++row)
+                for (unsigned column = 0; column < OceanSpectrumSize; ++column)
                 {
-                    unsigned idx = band * Cells + y * N + x;
-                    float    kx = signedIndex(x) * delta, kz = signedIndex(y) * delta, k = std::hypot(kx, kz);
+                    unsigned idx = band * Cells + row * OceanSpectrumSize + column;
+                    float    kx = signedIndex(column) * delta, kz = signedIndex(row) * delta, waveNumber = std::hypot(kx, kz);
                     Complex  amplitude = {};
-                    if (k > limits[band] && k <= limits[band + 1] && x != N / 2 && y != N / 2)
+                    if (waveNumber > limits[band] && waveNumber <= limits[band + 1] && column != OceanSpectrumSize / 2 &&
+                        row != OceanSpectrumSize / 2)
                     {
-                        float omega = dispersion(k, sea.depth);
-                        float power =
-                            density(sea, omega, std::atan2(kz, kx), source == 1) * groupVelocity(k, sea.depth) / k * delta * delta;
+                        float omega = dispersion(waveNumber, sea.depth);
+                        float power = density(sea, omega, std::atan2(kz, kx), source == 1) * groupVelocity(waveNumber, sea.depth) /
+                                      waveNumber * delta * delta;
                         // A smooth short-wave rolloff avoids concentrating slope
                         // energy at the hard 30 cm cutoff (Tessendorf, Eq. 41).
                         // The separate fine band supplies wind-driven ripples.
-                        power *= std::exp(-k * k * .12f * .12f);
+                        power *= std::exp(-waveNumber * waveNumber * .12f * .12f);
                         amplitude = scale(gaussian(idx ^ sea.seed ^ (source * 0x1234567u)), std::sqrt(std::max(0.0f, power) * .25f));
-                        o->modes[idx].omega = omega;
-                        o->modes[idx].waveNumber = k;
+                        ocean->modes[idx].omega = omega;
+                        ocean->modes[idx].waveNumber = waveNumber;
                     }
                     // Reuse the surface storage during construction; no temporary allocation.
-                    o->surface[idx].dx = amplitude.real;
-                    o->surface[idx].dz = amplitude.imaginary;
+                    ocean->surface[idx].dx = amplitude.real;
+                    ocean->surface[idx].dz = amplitude.imaginary;
                     variance += 2 * (amplitude.real * amplitude.real + amplitude.imaginary * amplitude.imaginary);
                 }
         }
         float height = source ? sea.swellHeight : sea.windWaveHeight;
         float normalization = variance > 0 ? height / (4 * std::sqrt(variance)) : 0;
-        for (unsigned i = 0; i < OceanModeCount; ++i)
+        for (unsigned sampleIndex = 0; sampleIndex < OceanModeCount; ++sampleIndex)
         {
-            o->modes[i].real += o->surface[i].dx * normalization;
-            o->modes[i].imaginary += o->surface[i].dz * normalization;
+            ocean->modes[sampleIndex].real += ocean->surface[sampleIndex].dx * normalization;
+            ocean->modes[sampleIndex].imaginary += ocean->surface[sampleIndex].dz * normalization;
         }
     }
     double energy = 0, slopeEnergy = 0;
     for (unsigned band = 0; band < OceanBands; ++band)
     {
-        double e = 0, weightedK = 0;
-        for (unsigned i = 0; i < Cells; ++i)
+        double bandEnergy = 0, weightedK = 0;
+        for (unsigned sampleIndex = 0; sampleIndex < Cells; ++sampleIndex)
         {
-            auto m = o->modes[band * Cells + i];
+            auto mode = ocean->modes[band * Cells + sampleIndex];
             // Geometry and water depth only change on configuration. Avoid
             // repeating this transcendental in every field of every physics step.
-            o->orbitalFactor[band * Cells + i] =
-                m.waveNumber > 0 ? 2 * Pi / OceanLengths[band] / m.waveNumber / std::tanh(m.waveNumber * sea.depth) : 0;
-            double power = 2 * (m.real * m.real + m.imaginary * m.imaginary);
-            e += power;
-            weightedK += power * m.waveNumber;
-            slopeEnergy += power * m.waveNumber * m.waveNumber;
+            ocean->orbitalFactor[band * Cells + sampleIndex] =
+                mode.waveNumber > 0 ? 2 * Pi / OceanLengths[band] / mode.waveNumber / std::tanh(mode.waveNumber * sea.depth) : 0;
+            double power = 2 * (mode.real * mode.real + mode.imaginary * mode.imaginary);
+            bandEnergy += power;
+            weightedK += power * mode.waveNumber;
+            slopeEnergy += power * mode.waveNumber * mode.waveNumber;
         }
-        o->representativeK[band] = e > 0 ? weightedK / e : 0;
-        energy += e;
+        ocean->representativeK[band] = bandEnergy > 0 ? weightedK / bandEnergy : 0;
+        energy += bandEnergy;
     }
-    o->metrics.significantHeight = 4 * std::sqrt(energy);
-    o->metrics.rmsSlope = std::sqrt(slopeEnergy);
-    memset(o->surface, 0, sizeof o->surface);
-    o->revision = ++generation;
-    calibrateWhitecaps(o);
-    updateOcean(o, 0); // Restore acceleration fields used as calibration scratch.
+    ocean->metrics.significantHeight = 4 * std::sqrt(energy);
+    ocean->metrics.rmsSlope = std::sqrt(slopeEnergy);
+    memset(ocean->surface, 0, sizeof ocean->surface);
+    ocean->revision = ++generation;
+    calibrateWhitecaps(ocean);
+    updateOcean(ocean, 0); // Restore acceleration fields used as calibration scratch.
 }
 Ocean* createOcean(const SeaState& settings)
 {
     MTRACY_ZONE("createOcean");
-    auto* o = tf_new(Ocean);
-    configureOcean(o, settings);
-    return o;
+    auto* ocean = tf_new(Ocean);
+    configureOcean(ocean, settings);
+    return ocean;
 }
-void destroyOcean(Ocean* o)
+void destroyOcean(Ocean* ocean)
 {
     MTRACY_ZONE("destroyOcean");
-    tf_delete(o);
+    tf_delete(ocean);
 }
-void updateOcean(Ocean* o, double time)
+void updateOcean(Ocean* ocean, double time)
 {
     MTRACY_ZONE("updateOcean");
-    o->time = time;
-    ++o->metrics.updates;
-    if (o->metrics.significantHeight == 0)
+    ocean->time = time;
+    ++ocean->metrics.updates;
+    if (ocean->metrics.significantHeight == 0)
         return;
     for (unsigned band = 0; band < OceanBands; ++band)
     {
-        auto* modes = o->modes + band * Cells;
-        auto* surface = o->surface + band * Cells;
-        for (unsigned y = 0; y < N; ++y)
-            for (unsigned x = 0; x < N; ++x)
+        auto* modes = ocean->modes + band * Cells;
+        auto* surface = ocean->surface + band * Cells;
+        for (unsigned row = 0; row < OceanSpectrumSize; ++row)
+            for (unsigned column = 0; column < OceanSpectrumSize; ++column)
             {
-                unsigned i = y * N + x;
-                auto     a = modes[i], b = modes[mirror(x, y)];
-                if (a.real == 0 && a.imaginary == 0 && b.real == 0 && b.imaginary == 0)
+                unsigned sampleIndex = row * OceanSpectrumSize + column;
+                auto     mode = modes[sampleIndex], mirroredMode = modes[mirror(column, row)];
+                if (mode.real == 0 && mode.imaginary == 0 && mirroredMode.real == 0 && mirroredMode.imaginary == 0)
                 {
-                    o->height[i] = o->derivative[i] = {};
+                    ocean->height[sampleIndex] = ocean->derivative[sampleIndex] = {};
                     continue;
                 }
-                float   phase = std::remainder(a.omega * time, 2.0 * Pi);
-                Complex e = { std::cos(phase), -std::sin(phase) };
-                auto    first = mul({ a.real, a.imaginary }, e);
-                auto    second = mul({ b.real, -b.imaginary }, { e.real, -e.imaginary });
-                float   advection = std::remainder((signedIndex(x) * o->settings.current.x + signedIndex(y) * o->settings.current.z) *
-                                                       (2 * Pi / OceanLengths[band]) * time,
-                                                   2.0 * Pi);
+                float   phase = std::remainder(mode.omega * time, 2.0 * Pi);
+                Complex wavePhase = { std::cos(phase), -std::sin(phase) };
+                auto    first = mul({ mode.real, mode.imaginary }, wavePhase);
+                auto    second = mul({ mirroredMode.real, -mirroredMode.imaginary }, { wavePhase.real, -wavePhase.imaginary });
+                float   advection =
+                    std::remainder((signedIndex(column) * ocean->settings.current.x + signedIndex(row) * ocean->settings.current.z) *
+                                       (2 * Pi / OceanLengths[band]) * time,
+                                   2.0 * Pi);
                 Complex currentPhase = { std::cos(advection), -std::sin(advection) };
-                o->height[i] = mul(add(first, second), currentPhase);
+                ocean->height[sampleIndex] = mul(add(first, second), currentPhase);
                 // Orbital velocity is the material derivative; uniform-current
                 // advection affects phase, not the intrinsic orbital frequency.
-                o->derivative[i] = mul(scale(timesI(sub(second, first)), a.omega), currentPhase);
+                ocean->derivative[sampleIndex] = mul(scale(timesI(sub(second, first)), mode.omega), currentPhase);
             }
         for (unsigned field = 0; field < 5; ++field)
         {
-            for (unsigned y = 0; y < N; ++y)
-                for (unsigned x = 0; x < N; ++x)
+            for (unsigned row = 0; row < OceanSpectrumSize; ++row)
+                for (unsigned column = 0; column < OceanSpectrumSize; ++column)
                 {
-                    unsigned i = y * N + x;
-                    auto     h = o->height[i], dh = o->derivative[i];
+                    unsigned sampleIndex = row * OceanSpectrumSize + column;
+                    auto     heightSpectrum = ocean->height[sampleIndex], dh = ocean->derivative[sampleIndex];
                     if (field == 0)
-                        o->work[i] = add(h, timesI(dh));
+                        ocean->work[sampleIndex] = add(heightSpectrum, timesI(dh));
                     else if (field == 4)
-                        o->work[i] = scale(h, -modes[i].omega * modes[i].omega);
+                        ocean->work[sampleIndex] = scale(heightSpectrum, -modes[sampleIndex].omega * modes[sampleIndex].omega);
                     else
                     {
-                        float factor = o->orbitalFactor[band * Cells + i];
-                        auto  horizontal = timesI(field == 2 ? dh : h);
+                        float factor = ocean->orbitalFactor[band * Cells + sampleIndex];
+                        auto  horizontal = timesI(field == 2 ? dh : heightSpectrum);
                         if (field == 3)
-                            horizontal = scale(horizontal, -modes[i].omega * modes[i].omega);
-                        o->work[i] = add(scale(horizontal, signedIndex(x) * factor), timesI(scale(horizontal, signedIndex(y) * factor)));
+                            horizontal = scale(horizontal, -modes[sampleIndex].omega * modes[sampleIndex].omega);
+                        ocean->work[sampleIndex] =
+                            add(scale(horizontal, signedIndex(column) * factor), timesI(scale(horizontal, signedIndex(row) * factor)));
                     }
                 }
-            inverseFFT(o->work, o->scratch, o->twiddles, N);
-            for (unsigned i = 0; i < Cells; ++i)
+            inverseFFT(ocean->work, ocean->scratch, ocean->twiddles, OceanSpectrumSize);
+            for (unsigned sampleIndex = 0; sampleIndex < Cells; ++sampleIndex)
             {
-                auto v = o->work[i];
+                auto fieldValue = ocean->work[sampleIndex];
                 if (field == 0)
                 {
-                    surface[i].height = v.real;
-                    surface[i].vy = v.imaginary;
+                    surface[sampleIndex].height = fieldValue.real;
+                    surface[sampleIndex].vy = fieldValue.imaginary;
                 }
                 else if (field == 1)
                 {
-                    surface[i].dx = v.real * o->settings.choppiness;
-                    surface[i].dz = v.imaginary * o->settings.choppiness;
+                    surface[sampleIndex].dx = fieldValue.real * ocean->settings.choppiness;
+                    surface[sampleIndex].dz = fieldValue.imaginary * ocean->settings.choppiness;
                 }
                 else if (field == 2)
                 {
-                    surface[i].vx = v.real;
-                    surface[i].vz = v.imaginary;
+                    surface[sampleIndex].vx = fieldValue.real;
+                    surface[sampleIndex].vz = fieldValue.imaginary;
                 }
                 else if (field == 3)
                 {
-                    surface[i].ax = v.real;
-                    surface[i].az = v.imaginary;
+                    surface[sampleIndex].ax = fieldValue.real;
+                    surface[sampleIndex].az = fieldValue.imaginary;
                 }
                 else
-                    surface[i].ay = v.real;
+                    surface[sampleIndex].ay = fieldValue.real;
             }
         }
     }
 }
-static Surface interpolate(const Ocean* o, unsigned band, float x, float z)
+static Surface interpolate(const Ocean* ocean, unsigned band, float worldX, float worldZ)
 {
-    float       u = x / OceanLengths[band] * N, v = z / OceanLengths[band] * N;
-    int         ix = int(std::floor(u)), iy = int(std::floor(v));
-    float       tx = u - std::floor(u), ty = v - std::floor(v);
-    const auto* field = o->surface + band * Cells;
+    float       gridX = worldX / OceanLengths[band] * OceanSpectrumSize, gridZ = worldZ / OceanLengths[band] * OceanSpectrumSize;
+    int         ix = int(std::floor(gridX)), iy = int(std::floor(gridZ));
+    float       tx = gridX - std::floor(gridX), ty = gridZ - std::floor(gridZ);
+    const auto* field = ocean->surface + band * Cells;
     Surface     out = {};
-    for (unsigned j = 0; j < 2; ++j)
-        for (unsigned i = 0; i < 2; ++i)
+    for (unsigned rowOffset = 0; rowOffset < 2; ++rowOffset)
+        for (unsigned columnOffset = 0; columnOffset < 2; ++columnOffset)
         {
-            float w = (i ? tx : 1 - tx) * (j ? ty : 1 - ty);
-            auto  s = field[((iy + int(j)) & (N - 1)) * N + ((ix + int(i)) & (N - 1))];
-            out.height += s.height * w;
-            out.dx += s.dx * w;
-            out.dz += s.dz * w;
-            out.vx += s.vx * w;
-            out.vy += s.vy * w;
-            out.vz += s.vz * w;
-            out.ax += s.ax * w;
-            out.ay += s.ay * w;
-            out.az += s.az * w;
+            float       weight = (columnOffset ? tx : 1 - tx) * (rowOffset ? ty : 1 - ty);
+            const auto& sample = field[((iy + int(rowOffset)) & (OceanSpectrumSize - 1)) * OceanSpectrumSize +
+                                       ((ix + int(columnOffset)) & (OceanSpectrumSize - 1))];
+            out.height += sample.height * weight;
+            out.dx += sample.dx * weight;
+            out.dz += sample.dz * weight;
+            out.vx += sample.vx * weight;
+            out.vy += sample.vy * weight;
+            out.vz += sample.vz * weight;
+            out.ax += sample.ax * weight;
+            out.ay += sample.ay * weight;
+            out.az += sample.az * weight;
         }
     return out;
 }
-WaterSample sampleOceanBand(const Ocean* o, unsigned band, float x, float z)
+WaterSample sampleOceanBand(const Ocean* ocean, unsigned band, float worldX, float worldZ)
 {
     MTRACY_FINE_ZONE("sampleOceanBand");
-    auto  s = interpolate(o, band, x, z);
-    float step = OceanLengths[band] / N;
-    auto  l = interpolate(o, band, x - step, z), r = interpolate(o, band, x + step, z);
-    auto  b = interpolate(o, band, x, z - step), t = interpolate(o, band, x, z + step);
-    float dx = (r.height - l.height) / (2 * step), dz = (t.height - b.height) / (2 * step);
-    float jxx = 1 + (r.dx - l.dx) / (2 * step), jzz = 1 + (t.dz - b.dz) / (2 * step);
-    float jxz = (t.dx - b.dx) / (2 * step), jzx = (r.dz - l.dz) / (2 * step);
+    auto  center = interpolate(ocean, band, worldX, worldZ);
+    float step = OceanLengths[band] / OceanSpectrumSize;
+    auto  left = interpolate(ocean, band, worldX - step, worldZ), right = interpolate(ocean, band, worldX + step, worldZ);
+    auto  back = interpolate(ocean, band, worldX, worldZ - step), front = interpolate(ocean, band, worldX, worldZ + step);
+    float dx = (right.height - left.height) / (2 * step), dz = (front.height - back.height) / (2 * step);
+    float jxx = 1 + (right.dx - left.dx) / (2 * step), jzz = 1 + (front.dz - back.dz) / (2 * step);
+    float jxz = (front.dx - back.dx) / (2 * step), jzx = (right.dz - left.dz) / (2 * step);
     float determinant = std::max(.25f, jxx * jzz - jxz * jzx);
-    return { s.height,
-             { s.dx, 0, s.dz },
+    return { center.height,
+             { center.dx, 0, center.dz },
              { -(dx * jzz - dz * jzx) / determinant, 1, -(dz * jxx - dx * jxz) / determinant },
-             { s.vx, s.vy, s.vz },
-             { s.ax, s.ay, s.az } };
+             { center.vx, center.vy, center.vz },
+             { center.ax, center.ay, center.az } };
 }
-WaterSample sampleOcean(const Ocean* o, float x, float z, float depth, uint32_t excludeBody)
+WaterSample sampleOcean(const Ocean* ocean, float worldX, float worldZ, float depth, uint32_t excludeBody)
 {
     MTRACY_FINE_ZONE("sampleOcean");
-    if (o->metrics.significantHeight == 0 && !o->activePackets && !o->activeHullWakes)
-        return { o->settings.level, {}, { 0, 1, 0 }, o->settings.current, {} };
+    if (ocean->metrics.significantHeight == 0 && !ocean->activePackets && !ocean->activeHullWakes)
+        return { ocean->settings.level, {}, { 0, 1, 0 }, ocean->settings.current, {} };
     WaterSample out = {};
-    out.height = o->settings.level;
+    out.height = ocean->settings.level;
     out.normal = { 0, 1, 0 };
-    out.velocity = o->settings.current;
-    if (o->metrics.significantHeight > 0)
+    out.velocity = ocean->settings.current;
+    if (ocean->metrics.significantHeight > 0)
     {
         // Invert horizontal displacement to query at the visible surface's
         // world coordinate. Flat-water wakes need none of these FFT lookups.
-        float qx = x, qz = z;
+        float qx = worldX, qz = worldZ;
         for (unsigned iteration = 0; iteration < 3; ++iteration)
         {
             float dx = 0, dz = 0;
             for (unsigned band = 0; band < OceanBands; ++band)
             {
-                auto s = interpolate(o, band, qx, qz);
-                dx += s.dx;
-                dz += s.dz;
+                auto sample = interpolate(ocean, band, qx, qz);
+                dx += sample.dx;
+                dz += sample.dz;
             }
-            qx = x - dx;
-            qz = z - dz;
+            qx = worldX - dx;
+            qz = worldZ - dz;
         }
         for (unsigned band = 0; band < OceanBands; ++band)
         {
-            auto s = sampleOceanBand(o, band, qx, qz);
-            out.height += s.height;
-            out.displacement.x += s.displacement.x;
-            out.displacement.z += s.displacement.z;
-            out.normal.x += s.normal.x;
-            out.normal.z += s.normal.z;
+            auto sample = sampleOceanBand(ocean, band, qx, qz);
+            out.height += sample.height;
+            out.displacement.x += sample.displacement.x;
+            out.displacement.z += sample.displacement.z;
+            out.normal.x += sample.normal.x;
+            out.normal.z += sample.normal.z;
             // Band-filtered orbital velocity uses the energy-weighted wave
             // number; the surface solution itself uses all spectral modes.
-            auto attenuation = orbitalAttenuation(o->representativeK[band], o->settings.depth, depth);
-            out.velocity.x += s.velocity.x * attenuation.x;
-            out.velocity.y += s.velocity.y * attenuation.y;
-            out.velocity.z += s.velocity.z * attenuation.z;
-            out.acceleration.x += s.acceleration.x * attenuation.x;
-            out.acceleration.y += s.acceleration.y * attenuation.y;
-            out.acceleration.z += s.acceleration.z * attenuation.z;
+            auto attenuation = orbitalAttenuation(ocean->representativeK[band], ocean->settings.depth, depth);
+            out.velocity.x += sample.velocity.x * attenuation.x;
+            out.velocity.y += sample.velocity.y * attenuation.y;
+            out.velocity.z += sample.velocity.z * attenuation.z;
+            out.acceleration.x += sample.acceleration.x * attenuation.x;
+            out.acceleration.y += sample.acceleration.y * attenuation.y;
+            out.acceleration.z += sample.acceleration.z * attenuation.z;
         }
     }
-    auto local = sampleWavePackets(o, x, z, depth, excludeBody);
+    auto local = sampleWavePackets(ocean, worldX, worldZ, depth, excludeBody);
     out.height += local.height;
     out.normal.x -= local.dx;
     out.normal.z -= local.dz;
@@ -541,7 +558,7 @@ WaterSample sampleOcean(const Ocean* o, float x, float z, float depth, uint32_t 
     out.normal.z /= length;
     return out;
 }
-bool emitWavePacket(Ocean* o, Vec3 position, Vec3 direction, float wavelength, float energy, bool pair, uint32_t sourceBody)
+bool emitWavePacket(Ocean* ocean, Vec3 position, Vec3 direction, float wavelength, float energy, bool pair, uint32_t sourceBody)
 {
     MTRACY_ZONE("emitWavePacket");
     if (energy <= 0)
@@ -556,129 +573,129 @@ bool emitWavePacket(Ocean* o, Vec3 position, Vec3 direction, float wavelength, f
     // phase coherence between emissions from a steadily moving hull.
     float    lambda = std::clamp(wavelength, .5f, 32.0f), radius = lambda * .75f;
     unsigned slot = MaxWavePackets;
-    for (unsigned i = 0; i < MaxWavePackets; ++i)
+    for (unsigned packetIndex = 0; packetIndex < MaxWavePackets; ++packetIndex)
     {
-        unsigned candidate = (bucket * WavePacketsPerBucket + o->packetCursor[bucket] + i) % MaxWavePackets;
-        if (o->packets[candidate].lifetime <= 0)
+        unsigned candidate = (bucket * WavePacketsPerBucket + ocean->packetCursor[bucket] + packetIndex) % MaxWavePackets;
+        if (ocean->packets[candidate].lifetime <= 0)
         {
             slot = candidate;
-            o->packetCursor[bucket] = (o->packetCursor[bucket] + i + 1) % MaxWavePackets;
+            ocean->packetCursor[bucket] = (ocean->packetCursor[bucket] + packetIndex + 1) % MaxWavePackets;
             break;
         }
     }
     if (slot == MaxWavePackets)
     {
-        ++o->droppedPackets;
+        ++ocean->droppedPackets;
         return false;
     }
     // The compact (1-r^2/R^2)^2 envelope has an integral of its square of pi R^2/5.
     // Averaging cos^2 over the carrier gives E ~= rho g A^2 pi R^2 / 10.
-    float      amplitude = std::min(lambda * .06f, std::sqrt(10 * energy / (1025 * 9.81f * Pi * radius * radius)));
-    WavePacket p = {};
-    p.freeX = p.x = position.x;
-    p.freeZ = p.z = position.z;
-    p.amplitude = amplitude;
-    p.freeAmplitude = pair ? amplitude : 0;
-    p.freeDirectionX = p.directionX = direction.x / norm;
-    p.freeDirectionZ = p.directionZ = direction.z / norm;
-    p.waveNumber = 2 * Pi / lambda;
-    p.omega = dispersion(p.waveNumber, o->settings.depth);
-    p.radius = radius;
-    p.lifetime = 12;
-    o->packets[slot] = p;
-    o->packetOwners[slot] = sourceBody;
-    ++o->activePackets;
+    float      amplitude = std::min(lambda * .06f, std::sqrt(10 * energy / (WaterDensity * Gravity * Pi * radius * radius)));
+    WavePacket packet = {};
+    packet.freeX = packet.x = position.x;
+    packet.freeZ = packet.z = position.z;
+    packet.amplitude = amplitude;
+    packet.freeAmplitude = pair ? amplitude : 0;
+    packet.freeDirectionX = packet.directionX = direction.x / norm;
+    packet.freeDirectionZ = packet.directionZ = direction.z / norm;
+    packet.waveNumber = 2 * Pi / lambda;
+    packet.omega = dispersion(packet.waveNumber, ocean->settings.depth);
+    packet.radius = radius;
+    packet.lifetime = 12;
+    ocean->packets[slot] = packet;
+    ocean->packetOwners[slot] = sourceBody;
+    ++ocean->activePackets;
     return true;
 }
-void advanceWavePackets(Ocean* o, float dt, Vec3 center, bool reflectDock)
+void advanceWavePackets(Ocean* ocean, float dt, Vec3 center, bool reflectDock)
 {
     MTRACY_ZONE("advanceWavePackets");
-    o->patchCenter = center;
-    for (unsigned i = 0; i < MaxWavePackets; ++i)
+    ocean->patchCenter = center;
+    for (unsigned packetIndex = 0; packetIndex < MaxWavePackets; ++packetIndex)
     {
-        auto& p = o->packets[i];
-        if (p.lifetime <= 0)
+        auto& packet = ocean->packets[packetIndex];
+        if (packet.lifetime <= 0)
             continue;
-        p.age += dt;
-        if (p.age >= p.lifetime)
+        packet.age += dt;
+        if (packet.age >= packet.lifetime)
         {
-            p.lifetime = 0;
-            --o->activePackets;
+            packet.lifetime = 0;
+            --ocean->activePackets;
             continue;
         }
-        float speed = groupVelocity(p.waveNumber, o->settings.depth);
-        p.freeX += (p.freeDirectionX * speed + o->settings.current.x) * dt;
-        p.freeZ += (p.freeDirectionZ * speed + o->settings.current.z) * dt;
-        float oldX = p.x;
-        p.x += (p.directionX * speed + o->settings.current.x) * dt;
-        p.z += (p.directionZ * speed + o->settings.current.z) * dt;
-        p.phase = std::remainder(p.phase + (p.waveNumber * speed - p.omega) * dt, 2 * Pi);
+        float speed = groupVelocity(packet.waveNumber, ocean->settings.depth);
+        packet.freeX += (packet.freeDirectionX * speed + ocean->settings.current.x) * dt;
+        packet.freeZ += (packet.freeDirectionZ * speed + ocean->settings.current.z) * dt;
+        float oldX = packet.x;
+        packet.x += (packet.directionX * speed + ocean->settings.current.x) * dt;
+        packet.z += (packet.directionZ * speed + ocean->settings.current.z) * dt;
+        packet.phase = std::remainder(packet.phase + (packet.waveNumber * speed - packet.omega) * dt, 2 * Pi);
         // The prototype dock has vertical faces at x=8.8 and x=11.2, z +/-15.
-        if (reflectDock && std::fabs(p.z) < 15 && ((oldX < 8.8f && p.x >= 8.8f) || (oldX > 11.2f && p.x <= 11.2f)))
+        if (reflectDock && std::fabs(packet.z) < 15 && ((oldX < 8.8f && packet.x >= 8.8f) || (oldX > 11.2f && packet.x <= 11.2f)))
         {
             float wall = oldX < 8.8f ? 8.8f : 11.2f;
-            p.x = 2 * wall - p.x;
-            p.directionX = -p.directionX;
-            p.amplitude *= .8f;
-            o->packetOwners[i] = UINT32_MAX; // A reflected wake is now an incoming wave.
+            packet.x = 2 * wall - packet.x;
+            packet.directionX = -packet.directionX;
+            packet.amplitude *= .8f;
+            ocean->packetOwners[packetIndex] = UINT32_MAX; // A reflected wake is now an incoming wave.
         }
     }
 }
-void clearWavePackets(Ocean* o)
+void clearWavePackets(Ocean* ocean)
 {
     MTRACY_ZONE("clearWavePackets");
-    memset(o->packets, 0, sizeof o->packets);
-    memset(o->packetCursor, 0, sizeof o->packetCursor);
-    memset(o->hullWakes, 0, sizeof o->hullWakes);
-    o->activePackets = o->droppedPackets = o->activeHullWakes = 0;
+    memset(ocean->packets, 0, sizeof ocean->packets);
+    memset(ocean->packetCursor, 0, sizeof ocean->packetCursor);
+    memset(ocean->hullWakes, 0, sizeof ocean->hullWakes);
+    ocean->activePackets = ocean->droppedPackets = ocean->activeHullWakes = 0;
 }
-static PacketSample packetContribution(const WavePacket& p, float x, float z, bool free, float depth, float below)
+static PacketSample packetContribution(const WavePacket& packet, float worldX, float worldZ, bool free, float depth, float below)
 {
     MTRACY_FINE_ZONE("packetContribution");
-    float amplitude = free ? p.freeAmplitude : p.amplitude;
-    float dx = x - (free ? p.freeX : p.x), dz = z - (free ? p.freeZ : p.z);
-    float r2 = (dx * dx + dz * dz) / (p.radius * p.radius);
+    float amplitude = free ? packet.freeAmplitude : packet.amplitude;
+    float dx = worldX - (free ? packet.freeX : packet.x), dz = worldZ - (free ? packet.freeZ : packet.z);
+    float r2 = (dx * dx + dz * dz) / (packet.radius * packet.radius);
     if (r2 >= 1 || amplitude == 0)
         return {};
-    float nx = free ? p.freeDirectionX : p.directionX, nz = free ? p.freeDirectionZ : p.directionZ;
-    float envelope = (1 - r2) * (1 - r2) * std::exp(-.18f * p.age);
+    float nx = free ? packet.freeDirectionX : packet.directionX, nz = free ? packet.freeDirectionZ : packet.directionZ;
+    float envelope = (1 - r2) * (1 - r2) * std::exp(-.18f * packet.age);
     // Fade the last second to zero instead of deleting a finite wave crest.
-    float remaining = std::clamp(p.lifetime - p.age, 0.0f, 1.0f);
+    float remaining = std::clamp(packet.lifetime - packet.age, 0.0f, 1.0f);
     float life = remaining * remaining * (3 - 2 * remaining), lifeRate = -6 * remaining * (1 - remaining);
-    float phase = p.waveNumber * (dx * nx + dz * nz) + p.phase, cosine = std::cos(phase), sine = std::sin(phase);
+    float phase = packet.waveNumber * (dx * nx + dz * nz) + packet.phase, cosine = std::cos(phase), sine = std::sin(phase);
     float common = amplitude * life;
-    float envelopeDx = -4 * dx / (p.radius * p.radius) * (1 - r2) * std::exp(-.18f * p.age);
-    float envelopeDz = -4 * dz / (p.radius * p.radius) * (1 - r2) * std::exp(-.18f * p.age);
-    float envelopeRate = -groupVelocity(p.waveNumber, depth) * (nx * envelopeDx + nz * envelopeDz) - .18f * envelope;
-    auto  attenuation = orbitalAttenuation(p.waveNumber, depth, below);
-    float horizontal = common * envelope * p.omega / std::tanh(p.waveNumber * depth) * cosine * attenuation.x;
+    float envelopeDx = -4 * dx / (packet.radius * packet.radius) * (1 - r2) * std::exp(-.18f * packet.age);
+    float envelopeDz = -4 * dz / (packet.radius * packet.radius) * (1 - r2) * std::exp(-.18f * packet.age);
+    float envelopeRate = -groupVelocity(packet.waveNumber, depth) * (nx * envelopeDx + nz * envelopeDz) - .18f * envelope;
+    auto  attenuation = orbitalAttenuation(packet.waveNumber, depth, below);
+    float horizontal = common * envelope * packet.omega / std::tanh(packet.waveNumber * depth) * cosine * attenuation.x;
     return { common * envelope * cosine,
-             common * (envelopeDx * cosine - envelope * p.waveNumber * nx * sine),
-             common * (envelopeDz * cosine - envelope * p.waveNumber * nz * sine),
-             (common * (envelopeRate * cosine + envelope * p.omega * sine) + amplitude * lifeRate * envelope * cosine) * attenuation.y,
+             common * (envelopeDx * cosine - envelope * packet.waveNumber * nx * sine),
+             common * (envelopeDz * cosine - envelope * packet.waveNumber * nz * sine),
+             (common * (envelopeRate * cosine + envelope * packet.omega * sine) + amplitude * lifeRate * envelope * cosine) * attenuation.y,
              horizontal * nx,
              horizontal * nz,
-             -9.81f * common * (envelopeDx * cosine - envelope * p.waveNumber * nx * sine) * attenuation.x,
-             -9.81f * common * (envelopeDz * cosine - envelope * p.waveNumber * nz * sine) * attenuation.x };
+             -Gravity * common * (envelopeDx * cosine - envelope * packet.waveNumber * nx * sine) * attenuation.x,
+             -Gravity * common * (envelopeDz * cosine - envelope * packet.waveNumber * nz * sine) * attenuation.x };
 }
-PacketSample sampleWavePackets(const Ocean* o, float x, float z, float below, uint32_t excludeBody)
+PacketSample sampleWavePackets(const Ocean* ocean, float worldX, float worldZ, float below, uint32_t excludeBody)
 {
     MTRACY_FINE_ZONE("sampleWavePackets");
     PacketSample value = {};
-    float        tx = std::clamp((32 - std::fabs(x - o->patchCenter.x)) / 8, 0.0f, 1.0f);
-    float        tz = std::clamp((32 - std::fabs(z - o->patchCenter.z)) / 8, 0.0f, 1.0f);
+    float        tx = std::clamp((32 - std::fabs(worldX - ocean->patchCenter.x)) / 8, 0.0f, 1.0f);
+    float        tz = std::clamp((32 - std::fabs(worldZ - ocean->patchCenter.z)) / 8, 0.0f, 1.0f);
     float        bx = tx * tx * (3 - 2 * tx), bz = tz * tz * (3 - 2 * tz), blend = bx * bz;
     if (blend == 0)
         return value;
-    for (const auto& wake : o->hullWakes)
+    for (const auto& wake : ocean->hullWakes)
     {
         if (wake.amplitude <= 0 || (excludeBody != UINT32_MAX && wake.sourceBody == excludeBody))
             continue;
-        const float     rx = x - wake.position.x, rz = z - wake.position.z;
+        const float     rx = worldX - wake.position.x, rz = worldZ - wake.position.z;
         const float     along = rx * wake.forward.x + rz * wake.forward.z;
         const float     across = rx * wake.forward.z - rz * wake.forward.x;
         const unsigned  hulls = wake.spacing > 0 ? 2 : 1;
-        const float     vertical = orbitalAttenuation(2 * Pi / wake.length, o->settings.depth, below).y;
+        const float     vertical = orbitalAttenuation(2 * Pi / wake.length, ocean->settings.depth, below).y;
         // A bounded moving-pressure approximation: bow pile-up, shoulder
         // drawdown and stern recovery. Dynamic head sets the amplitude; it
         // vanishes at rest and reverses with the hull's through-water motion.
@@ -700,18 +717,18 @@ PacketSample sampleWavePackets(const Ocean* o, float x, float z, float below, ui
                 value.dx += dx;
                 value.dz += dz;
                 value.verticalVelocity +=
-                    ((o->settings.current.x - wake.velocity.x) * dx + (o->settings.current.z - wake.velocity.z) * dz) * vertical;
+                    ((ocean->settings.current.x - wake.velocity.x) * dx + (ocean->settings.current.z - wake.velocity.z) * dz) * vertical;
             }
         }
     }
-    if (o->activePackets)
-        for (unsigned i = 0; i < MaxWavePackets; ++i)
+    if (ocean->activePackets)
+        for (unsigned packetIndex = 0; packetIndex < MaxWavePackets; ++packetIndex)
         {
-            const auto& p = o->packets[i];
-            if (p.lifetime <= 0 || (excludeBody != UINT32_MAX && o->packetOwners[i] == excludeBody))
+            const auto& packet = ocean->packets[packetIndex];
+            if (packet.lifetime <= 0 || (excludeBody != UINT32_MAX && ocean->packetOwners[packetIndex] == excludeBody))
                 continue;
-            auto actual = packetContribution(p, x, z, false, o->settings.depth, below),
-                 free = packetContribution(p, x, z, true, o->settings.depth, below);
+            auto actual = packetContribution(packet, worldX, worldZ, false, ocean->settings.depth, below),
+                 free = packetContribution(packet, worldX, worldZ, true, ocean->settings.depth, below);
             value.height += actual.height - free.height;
             value.dx += actual.dx - free.dx;
             value.dz += actual.dz - free.dz;
@@ -723,8 +740,8 @@ PacketSample sampleWavePackets(const Ocean* o, float x, float z, float below, ui
         }
     // Separate smooth edge weights also keep the derivative continuous at
     // patch corners. A max(abs(x),abs(z)) fade left diagonal normal seams.
-    value.dx = value.dx * blend - value.height * bz * 6 * tx * (1 - tx) / 8 * std::copysign(1.0f, x - o->patchCenter.x);
-    value.dz = value.dz * blend - value.height * bx * 6 * tz * (1 - tz) / 8 * std::copysign(1.0f, z - o->patchCenter.z);
+    value.dx = value.dx * blend - value.height * bz * 6 * tx * (1 - tx) / 8 * std::copysign(1.0f, worldX - ocean->patchCenter.x);
+    value.dz = value.dz * blend - value.height * bx * 6 * tz * (1 - tz) / 8 * std::copysign(1.0f, worldZ - ocean->patchCenter.z);
     value.height *= blend;
     value.verticalVelocity *= blend;
     value.velocityX *= blend;
@@ -733,20 +750,20 @@ PacketSample sampleWavePackets(const Ocean* o, float x, float z, float below, ui
     value.accelerationZ *= blend;
     return value;
 }
-const WavePacket* oceanPackets(const Ocean* o) { return o->packets; }
-void              setHullWake(Ocean* o, unsigned index, const HullWake& wake)
+const WavePacket* oceanPackets(const Ocean* ocean) { return ocean->packets; }
+void              setHullWake(Ocean* ocean, unsigned index, const HullWake& wake)
 {
     ASSERT(index < MaxHullWakes);
-    o->activeHullWakes -= o->hullWakes[index].amplitude > 0;
-    o->activeHullWakes += wake.amplitude > 0;
-    o->hullWakes[index] = wake;
+    ocean->activeHullWakes -= ocean->hullWakes[index].amplitude > 0;
+    ocean->activeHullWakes += wake.amplitude > 0;
+    ocean->hullWakes[index] = wake;
 }
-const HullWake*     oceanHullWakes(const Ocean* o) { return o->hullWakes; }
-Vec3                oceanPatchCenter(const Ocean* o) { return o->patchCenter; }
-unsigned            activeWavePackets(const Ocean* o) { return o->activePackets; }
-unsigned            droppedWavePackets(const Ocean* o) { return o->droppedPackets; }
-const SeaState&     seaState(const Ocean* o) { return o->settings; }
-const SpectrumMode* oceanSpectrum(const Ocean* o) { return o->modes; }
-const OceanMetrics& oceanMetrics(const Ocean* o) { return o->metrics; }
-uint32_t            oceanRevision(const Ocean* o) { return o->revision; }
+const HullWake*     oceanHullWakes(const Ocean* ocean) { return ocean->hullWakes; }
+Vec3                oceanPatchCenter(const Ocean* ocean) { return ocean->patchCenter; }
+unsigned            activeWavePackets(const Ocean* ocean) { return ocean->activePackets; }
+unsigned            droppedWavePackets(const Ocean* ocean) { return ocean->droppedPackets; }
+const SeaState&     seaState(const Ocean* ocean) { return ocean->settings; }
+const SpectrumMode* oceanSpectrum(const Ocean* ocean) { return ocean->modes; }
+const OceanMetrics& oceanMetrics(const Ocean* ocean) { return ocean->metrics; }
+uint32_t            oceanRevision(const Ocean* ocean) { return ocean->revision; }
 } // namespace mooring

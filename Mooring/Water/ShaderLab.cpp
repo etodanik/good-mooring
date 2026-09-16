@@ -13,11 +13,11 @@
 #include "../Shaders/ShaderLab.srt.h"
 #include "../Shaders/Water.srt.h"
 #include <algorithm>
-#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #if defined(MOORING_SHADER_LAB)
@@ -42,7 +42,8 @@ struct Binding
     const void* handle = nullptr;
     unsigned    slot = 0, set = 0, index = 0;
     uint64_t    offset = 0;
-    std::string name;
+    // FSL descriptor names are string literals in the static shader resource tables.
+    const char* name = "";
 };
 struct PipelineInfo
 {
@@ -129,6 +130,8 @@ struct Lab: PreviewSettings
     bool                      showBuildLog = false, controlsOnly = false, reloadFailed = false;
     std::string               lastEntry[4], returnPipeline;
     std::vector<SavedPreview> savedPreviews;
+    std::vector<int>          searchMatches;
+    std::string               searchText, entryLabel, wrappedLine;
     char                      search[4][128] = {};
     bool                      pending[2] = {}, freezeRendered = false;
     NSString*                 watchedSignature = nil;
@@ -137,14 +140,18 @@ struct Lab: PreviewSettings
     char                      applied[256] = "";
 } lab;
 
-void label(const char* text) { uiLabel(text, TF_ALIGN_LEFT); }
+using toolui::button;
+using toolui::heading;
+using toolui::label;
+using toolui::number;
 void wrapped(const char* text, float width)
 {
     const char* cursor = text;
     while (*cursor)
     {
         const char* end = std::strchr(cursor, '\n');
-        std::string line(cursor, end ? size_t(end - cursor) : std::strlen(cursor));
+        auto&       line = lab.wrappedLine;
+        line.assign(cursor, end ? size_t(end - cursor) : std::strlen(cursor));
         const float rows = std::max(1.0f, std::ceil(float(uiGetTextWidth(line.c_str())) / std::max(40.0f, width - 32)));
         uiLayoutDynamicRows(rows * uiLayoutGetTextSize("M", 1).y + 4, 1);
         bstring message = bconstfromcstr(line.c_str());
@@ -154,20 +161,10 @@ void wrapped(const char* text, float width)
             ++cursor;
     }
 }
-bool button(const char* text) { return UI_WIDGET_IS_PRESSED(uiButton(text)); }
 void changed()
 {
     ++lab.generation;
     lab.freezeRendered = false;
-}
-bool scalar(const char* title, float& value, float low, float high, float step)
-{
-    uiLayoutAutoTextRows(2);
-    label(title);
-    float before = value;
-    // Drawing a control must not clamp a resource's larger default domain.
-    uiPropertyFloat(&value, std::min(low, value), std::max(high, value), step);
-    return before != value;
 }
 std::string string(NSDictionary* dictionary, NSString* key)
 {
@@ -405,7 +402,7 @@ void shaderLabUpdateDescriptorSet(TFRenderer* renderer, uint32_t index, TFDescri
         if (type == TF_DESCRIPTOR_TYPE_SAMPLER)
             continue;
         Binding binding;
-        IF_VALIDATE_DESCRIPTOR(binding.name = set->pDescriptors[update.mIndex].pName;)
+        IF_VALIDATE_DESCRIPTOR(binding.name = set->pDescriptors[update.mIndex].pName ? set->pDescriptors[update.mIndex].pName : "";)
         std::memcpy(&binding.handle, update.ppBuffers, sizeof(binding.handle));
         binding.slot = update.mIndex;
         binding.set = set->mSetIndex;
@@ -732,7 +729,6 @@ float4 shaderLabProbeDisplay()
 #if defined(MOORING_SHADER_LAB)
 namespace
 {
-constexpr float4 HeadingColor{ .55f, .78f, 1, 1 };
 constexpr float4 MutedColor{ .68f, .72f, .77f, 1 };
 constexpr float4 ReadyColor{ .55f, .85f, .65f, 1 };
 constexpr float4 WarningColor{ 1, .77f, .4f, 1 };
@@ -767,16 +763,11 @@ const std::string& entryName(int category, int index)
     }
 }
 const std::string& entryKey(int category, int index) { return category == 0 ? lab.previews[index].function : entryName(category, index); }
-std::string        entryTitle(int category, int index)
+std::string_view   entryTitle(int category, int index)
 {
-    const auto& name = entryName(category, index);
+    const std::string_view name = entryName(category, index);
     // Wrappers can include parameter hints in their labels. Keep those in the inspector.
     return name.substr(0, name.find(" ("));
-}
-bool containsIgnoringCase(const std::string& text, const char* query)
-{
-    return std::search(text.begin(), text.end(), query, query + std::strlen(query),
-                       [](unsigned char left, unsigned char right) { return std::tolower(left) == std::tolower(right); }) != text.end();
 }
 void rememberPreview()
 {
@@ -827,11 +818,6 @@ unsigned previewDimensions()
         return 3;
     return 2;
 }
-void heading(const char* title)
-{
-    uiLayoutAutoTextRows(1);
-    uiColorLabel(title, TF_ALIGN_LEFT, HeadingColor);
-}
 void muted(const char* text)
 {
     uiLayoutAutoTextRows(1);
@@ -847,33 +833,55 @@ bool integerField(const char* title, int& value, int minimum, int maximum)
 }
 void sourceLocation(const std::string& source, unsigned line, float width)
 {
-    char location[512];
-    snprintf(location, sizeof location, "%s:%u", source.substr(source.find_last_of('/') + 1).c_str(), line);
+    char         location[512];
+    const size_t filenameOffset = source.find_last_of('/') + 1;
+    snprintf(location, sizeof location, "%s:%u", source.c_str() + filenameOffset, line);
     wrapped(location, width);
 }
 
 void drawEntryBrowser(WaterLook& look, float height, float width)
 {
-    uiLayoutAutoTextRows(1);
+    uiLayoutAutoTextboxRows(1);
     const float top = uiLayoutPeek()[1];
     bstring     query = bfromarr(lab.search[lab.category]);
-    uiTextbox("Search", &query, TF_WIDGET_EDIT_FILTER_ASCII);
+    uiTextbox("Search", &query, TF_WIDGET_EDIT_FILTER_ASCII, false);
+    uiLayoutAutoTextRows(1);
     if (!query.slen)
         uiBeginWidgetDisable();
     if (button("Clear search"))
         lab.search[lab.category][0] = 0;
     if (!query.slen)
         uiEndWidgetDisable();
-    char             count[80];
-    std::vector<int> matches;
+    char  count[80];
+    auto& matches = lab.searchMatches;
+    matches.clear();
+    matches.reserve(entryCount(lab.category));
     for (int index = 0; index < entryCount(lab.category); ++index)
     {
-        std::string searchable = entryName(lab.category, index);
+        if (!lab.search[lab.category][0])
+        {
+            matches.push_back(index);
+            continue;
+        }
+        auto& searchable = lab.searchText;
+        searchable = entryName(lab.category, index);
         if (lab.category == 0)
-            searchable += " " + lab.previews[index].function + " " + lab.previews[index].source;
+        {
+            searchable += ' ';
+            searchable += lab.previews[index].function;
+            searchable += ' ';
+            searchable += lab.previews[index].source;
+        }
         if (lab.category == 2)
-            searchable += " " + pipelines[index].vertex + " " + pipelines[index].fragment + " " + pipelines[index].compute;
-        if (!lab.search[lab.category][0] || containsIgnoringCase(searchable, lab.search[lab.category]))
+        {
+            searchable += ' ';
+            searchable += pipelines[index].vertex;
+            searchable += ' ';
+            searchable += pipelines[index].fragment;
+            searchable += ' ';
+            searchable += pipelines[index].compute;
+        }
+        if (toolui::containsIgnoringCase(searchable.c_str(), lab.search[lab.category]))
             matches.push_back(index);
     }
     snprintf(count, sizeof count, "%zu of %d entries", matches.size(), entryCount(lab.category));
@@ -884,13 +892,14 @@ void drawEntryBrowser(WaterLook& look, float height, float width)
         uiLayoutAutoTextRows(1);
         for (int index : matches)
         {
-            std::string title = entryTitle(lab.category, index);
+            auto& title = lab.entryLabel;
+            title = entryTitle(lab.category, index);
             const float available = uiLayoutPeek()[2] - 24;
             if (uiGetTextWidth(title.c_str()) > available)
             {
-                while (title.size() > 1 && uiGetTextWidth((title + "...").c_str()) > available)
-                    title.pop_back();
                 title += "...";
+                while (title.size() > 4 && uiGetTextWidth(title.c_str()) > available)
+                    title.erase(title.size() - 4, 1);
             }
             if (toolui::button(title.c_str(), index == lab.selected, true, entryName(lab.category, index).c_str()) && index != lab.selected)
             {
@@ -939,8 +948,8 @@ void drawDisplayControls(unsigned dimensions)
     int  component = UI_WIDGET_GET_SELECTED(uiDropdown(channels + first, 5 - first, std::max(0, lab.component + 1 - first))) + first - 1;
     bool edited = component != lab.component;
     lab.component = component;
-    edited |= scalar("Minimum", lab.minimum, std::min(-10.0f, lab.minimum), std::max(10.0f, lab.maximum), .01f);
-    edited |= scalar("Maximum", lab.maximum, std::min(-10.0f, lab.minimum), std::max(10.0f, lab.maximum), .01f);
+    edited |= number("Minimum", lab.minimum, std::min(-10.0f, lab.minimum), std::max(10.0f, lab.maximum), .01f);
+    edited |= number("Maximum", lab.maximum, std::min(-10.0f, lab.minimum), std::max(10.0f, lab.maximum), .01f);
     lab.maximum = std::max(lab.minimum + .0001f, lab.maximum);
     uiLayoutAutoTextRows(1);
     if (lab.category < 2)
@@ -1074,7 +1083,7 @@ void drawInspector(float width)
         edited |= plane != lab.sliceAxis;
         lab.sliceAxis = plane;
         const bool texture = lab.category == 1 && resources[lab.selected].texture;
-        edited |= scalar("Slice", lab.slice, texture ? 0 : -10000, texture ? 1 : 10000, texture ? .01f : .1f);
+        edited |= number("Slice", lab.slice, texture ? 0 : -10000, texture ? 1 : 10000, texture ? .01f : .1f);
     }
     heading("Canvas");
     const char* resolutions2D[] = { "128 x 128 samples", "256 x 256 samples", "512 x 512 samples" };
@@ -1085,10 +1094,10 @@ void drawInspector(float width)
                                                                                               : 2));
     edited |= resolution != lab.resolution;
     lab.resolution = resolution;
-    edited |= scalar("Zoom", lab.zoom, 1, 32, .25f);
-    edited |= scalar("Pan X", lab.panX, 0, 1, .01f);
+    edited |= number("Zoom", lab.zoom, 1, 32, .25f);
+    edited |= number("Pan X", lab.panX, 0, 1, .01f);
     if (dimensions != 1)
-        edited |= scalar("Pan Y", lab.panY, 0, 1, .01f);
+        edited |= number("Pan Y", lab.panY, 0, 1, .01f);
     uiLayoutAutoTextRows(1);
     if (button("Reset zoom and pan"))
     {
@@ -1103,22 +1112,22 @@ void drawInspector(float width)
     for (unsigned axis = 0; axis < dimensions; ++axis)
     {
         snprintf(text, sizeof text, "Origin %s", axes[axis]);
-        edited |= scalar(text, lab.origin[axis], -10000, 10000, .1f);
+        edited |= number(text, lab.origin[axis], -10000, 10000, .1f);
         snprintf(text, sizeof text, "Span %s", axes[axis]);
-        edited |= scalar(text, lab.extent[axis], .001f, dimensions == 3 ? 10000 : 512, .1f);
+        edited |= number(text, lab.extent[axis], .001f, dimensions == 3 ? 10000 : 512, .1f);
     }
     if (lab.category == 0)
     {
         heading("Time and parameters");
         edited |= UI_WIDGET_IS_CHANGED(uiCheckbox("Animate preview time", &lab.animate));
-        edited |= scalar("Time (seconds)", lab.time, 0, std::max(120.0f, lab.time), .1f);
+        edited |= number("Time (seconds)", lab.time, 0, std::max(120.0f, lab.time), .1f);
         const auto& preview = lab.previews[lab.selected];
         const auto  hint = preview.name.find(" (");
         if (hint != std::string::npos)
-            wrapped(preview.name.substr(hint + 1).c_str(), width);
+            wrapped(preview.name.c_str() + hint + 1, width);
         const char* parameters[] = { "Parameter X", "Parameter Y", "Parameter Z", "Parameter W" };
         for (unsigned parameter = 0; parameter < 4; ++parameter)
-            edited |= scalar(parameters[parameter], lab.parameters[parameter], -10, 10, .01f);
+            edited |= number(parameters[parameter], lab.parameters[parameter], -10, 10, .01f);
         heading("Source");
         wrapped(preview.function.c_str(), width);
         sourceLocation(preview.source, preview.line, width);
@@ -1238,7 +1247,7 @@ void drawPipelineBindings(float width)
     {
         const auto resource = std::find_if(resources.begin(), resources.end(), [&](const auto& item)
                                            { return item.buffer == binding.handle || item.texture == binding.handle; });
-        snprintf(text, sizeof text, "%s / set %u [%u], slot %u", binding.name.c_str(), binding.set, binding.index, binding.slot);
+        snprintf(text, sizeof text, "%s / set %u [%u], slot %u", binding.name, binding.set, binding.index, binding.slot);
         wrapped(text, width);
         if (resource != resources.end())
         {
@@ -1395,7 +1404,8 @@ void drawShaderLab(WaterLook& look, unsigned width, unsigned height)
                 wrapped("No entries are registered. Add a preview wrapper and reload shaders.", canvasWidth);
             else
             {
-                uiColorLabel(entryTitle(lab.category, lab.selected).c_str(), TF_ALIGN_LEFT, HeadingColor);
+                lab.entryLabel = entryTitle(lab.category, lab.selected);
+                uiColorLabel(lab.entryLabel.c_str(), TF_ALIGN_LEFT, toolui::Heading);
                 if (compact && button(lab.controlsOnly ? "Back to preview" : "Show controls"))
                     lab.controlsOnly = !lab.controlsOnly;
                 if (compact && lab.controlsOnly)

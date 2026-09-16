@@ -68,12 +68,13 @@ struct FlowSample
 {
     float time, velocity;
 };
+constexpr unsigned PropellerHistorySize = 256;
 struct PropellerState
 {
     float      rpm;
     float      immersion = 1, advanceFactor = 1;
     uint32_t   next;
-    FlowSample history[256];
+    FlowSample history[PropellerHistorySize];
 };
 VesselLayout     monohullLayout(bool twinRudders = false);
 VesselLayout     catamaranLayout();

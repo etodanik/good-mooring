@@ -5,10 +5,11 @@
 
 namespace mooring
 {
-Vec3 deckToWorld(const Snapshot& s, Vec3 p)
+Vec3 deckToWorld(const Snapshot& boat, Vec3 deckPosition)
 {
-    auto q = s.rotation;
-    return fromForge(f3Add(toForge(s.position), quatRotateVector(make_quat(q.x, q.y, q.z, q.w), toForge(p))));
+    auto rotation = boat.rotation;
+    return fromForge(
+        f3Add(toForge(boat.position), quatRotateVector(make_quat(rotation.x, rotation.y, rotation.z, rotation.w), toForge(deckPosition))));
 }
 Vec3 stationPosition(Station station)
 {
@@ -27,45 +28,45 @@ Vec3 stationPosition(Station station)
     }
     return {};
 }
-static float3 cameraOffset(const Camera& c)
+static float3 cameraOffset(const Camera& camera)
 {
-    float elevation = c.elevation * .01745329252f, azimuth = c.azimuth * .01745329252f;
+    float elevation = camera.elevation * .01745329252f, azimuth = camera.azimuth * .01745329252f;
     return { std::sin(azimuth) * std::cos(elevation), std::sin(elevation), std::cos(azimuth) * std::cos(elevation) };
 }
-Vec3 cameraEye(const Camera& c) { return fromForge(f3Add(toForge(c.focus), f3MulScalar(cameraOffset(c), c.distance))); }
-void updateCamera(Camera& c, float dt)
+Vec3 cameraEye(const Camera& camera) { return fromForge(f3Add(toForge(camera.focus), f3MulScalar(cameraOffset(camera), camera.distance))); }
+void updateCamera(Camera& camera, float dt)
 {
     MTRACY_ZONE("updateCamera");
-    float t = 1 - std::exp(-7 * std::min(dt, .1f));
-    c.focus = fromForge(f3Lerp(toForge(c.focus), toForge(c.target), t));
-    c.distance += (c.targetDistance - c.distance) * t;
+    float blend = 1 - std::exp(-7 * std::min(dt, .1f));
+    camera.focus = fromForge(f3Lerp(toForge(camera.focus), toForge(camera.target), blend));
+    camera.distance += (camera.targetDistance - camera.distance) * blend;
 }
-void zoomCamera(Camera& c, float amount)
+void zoomCamera(Camera& camera, float amount)
 {
-    c.targetDistance = std::clamp(c.targetDistance * std::exp(-std::clamp(amount, -5.0f, 5.0f) * .1f), 9.0f, 85.0f);
+    camera.targetDistance = std::clamp(camera.targetDistance * std::exp(-std::clamp(amount, -5.0f, 5.0f) * .1f), 9.0f, 85.0f);
 }
-void panCamera(Camera& c, float dx, float dy)
+void panCamera(Camera& camera, float dx, float dy)
 {
-    auto  forward = f3Normalize(f3Sub(toForge(c.focus), toForge(cameraEye(c))));
+    auto  forward = f3Normalize(f3Sub(toForge(camera.focus), toForge(cameraEye(camera))));
     auto  right = f3Normalize(f3Cross(make_float3(0, 1, 0), forward));
     auto  up = f3Cross(forward, right);
-    float scale = c.distance * .9f / std::max(1u, c.height);
+    float scale = camera.distance * .9f / std::max(1u, camera.height);
     auto  offset = f3Add(f3MulScalar(right, -dx * scale), f3MulScalar(f3Normalize(make_float3(up.x, 0, up.z)), dy * scale));
-    c.target = fromForge(f3Add(toForge(c.target), offset));
-    c.focus = fromForge(f3Add(toForge(c.focus), offset));
+    camera.target = fromForge(f3Add(toForge(camera.target), offset));
+    camera.focus = fromForge(f3Add(toForge(camera.focus), offset));
 }
-f4x4 cameraMatrix(const Camera& c)
+f4x4 cameraMatrix(const Camera& camera)
 {
-    float inverseAspect = float(c.height) / std::max(1u, c.width);
+    float inverseAspect = float(camera.height) / std::max(1u, camera.width);
     float horizontalFov = 2 * std::atan(1 / (2.41421356f * inverseAspect));
     return f4x4Mul(f4x4PerspectiveLH(horizontalFov, inverseAspect, .2f, 10000),
-                   f4x4LookAtLH(toForge(cameraEye(c)), toForge(c.focus), make_float3(0, 1, 0)));
+                   f4x4LookAtLH(toForge(cameraEye(camera)), toForge(camera.focus), make_float3(0, 1, 0)));
 }
-Vec3 project(const Camera& c, Vec3 world)
+Vec3 project(const Camera& camera, Vec3 world)
 {
-    auto clip = f4x4Mulf4(cameraMatrix(c), make_float4(world.x, world.y, world.z, 1));
+    auto clip = f4x4Mulf4(cameraMatrix(camera), make_float4(world.x, world.y, world.z, 1));
     if (clip.w <= .2f)
         return { -10000, -10000, clip.w };
-    return { (1 + clip.x / clip.w) * c.width * .5f, (1 - clip.y / clip.w) * c.height * .5f, clip.w };
+    return { (1 + clip.x / clip.w) * camera.width * .5f, (1 - clip.y / clip.w) * camera.height * .5f, clip.w };
 }
 } // namespace mooring

@@ -8,14 +8,14 @@
 #include "Common/Utilities/Interfaces/IMemory.h"
 using namespace mooring;
 static unsigned failures;
-#define CHECK(x)                                        \
-    do                                                  \
-    {                                                   \
-        if (!(x))                                       \
-        {                                               \
-            printf("FAIL line %d: %s\n", __LINE__, #x); \
-            ++failures;                                 \
-        }                                               \
+#define CHECK(condition)                                        \
+    do                                                          \
+    {                                                           \
+        if (!(condition))                                       \
+        {                                                       \
+            printf("FAIL line %d: %s\n", __LINE__, #condition); \
+            ++failures;                                         \
+        }                                                       \
     } while (0)
 int main()
 {
@@ -32,91 +32,91 @@ int main()
         CHECK(std::fabs((interior.z - entry.z) * 512 - 3) < .002f);
         CHECK(std::fabs(entry.x - interior.x) < .00002f && std::fabs(entry.y - interior.y) < .00002f);
     }
-    World* w = createWorld();
-    CHECK(canOperateHelm(w, 0));
-    CHECK(!canOperateHelm(w, 1));
-    enqueue(w, { CommandType::Throttle, 0, Station::Helm, 0, .4f });
-    enqueue(w, { CommandType::Wheel, 0, Station::Helm, 0, .3f });
-    step(w);
-    enqueue(w, { CommandType::Attend, 0, Station::Bow });
-    advance(w, 1, 0); // Queue travel while paused, with no physical progress.
-    CHECK(snapshot(w, false).travelling);
-    CHECK(!canOperateHelm(w, 0));
-    CHECK(snapshot(w, false).travelRemaining > 5);
+    World* world = createWorld();
+    CHECK(canOperateHelm(world, 0));
+    CHECK(!canOperateHelm(world, 1));
+    enqueue(world, { CommandType::Throttle, 0, Station::Helm, 0, .4f });
+    enqueue(world, { CommandType::Wheel, 0, Station::Helm, 0, .3f });
+    step(world);
+    enqueue(world, { CommandType::Attend, 0, Station::Bow });
+    advance(world, 1, 0); // Queue travel while paused, with no physical progress.
+    CHECK(snapshot(world, false).travelling);
+    CHECK(!canOperateHelm(world, 0));
+    CHECK(snapshot(world, false).travelRemaining > 5);
     Camera camera = {};
-    camera.target = deckToWorld(snapshot(w, false), stationPosition(Station::Helm));
+    camera.target = deckToWorld(snapshot(world, false), stationPosition(Station::Helm));
     camera.targetDistance = 9;
-    for (unsigned i = 0; i < 120; ++i)
+    for (unsigned frameIndex = 0; frameIndex < 120; ++frameIndex)
     {
         updateCamera(camera, FixedStep);
         panCamera(camera, 1, -1);
         zoomCamera(camera, .1f);
     }
-    CHECK(!canOperateHelm(w, 0));
-    CHECK(snapshot(w, false).travelling);
-    CHECK(snapshot(w, false).travelRemaining > 5);
-    enqueue(w, { CommandType::Throttle, 0, Station::Helm, 0, -1 });
-    enqueue(w, { CommandType::Wheel, 0, Station::Helm, 0, -.5f });
-    step(w);
-    CHECK(std::fabs(snapshot(w, false).throttle[0] - .4f) < .0001f);
-    CHECK(std::fabs(snapshot(w, false).rudder - .3f) < .0001f);
-    CHECK(statistics(w).rejectedCommands == 2);
-    for (unsigned i = 0; i < 600; ++i)
-        step(w);
-    CHECK(!snapshot(w, false).travelling);
-    CHECK(!canOperateHelm(w, 0));
-    enqueue(w, { CommandType::Attend, 1, Station::Helm });
-    step(w);
-    CHECK(!canOperateHelm(w, 1));
-    setHelmSkill(w, 1, 2);
-    enqueue(w, { CommandType::Attend, 1, Station::Helm });
-    step(w);
-    CHECK(!canOperateHelm(w, 1));
-    for (unsigned i = 0; i < 100; ++i)
-        step(w);
-    CHECK(canOperateHelm(w, 1));
+    CHECK(!canOperateHelm(world, 0));
+    CHECK(snapshot(world, false).travelling);
+    CHECK(snapshot(world, false).travelRemaining > 5);
+    enqueue(world, { CommandType::Throttle, 0, Station::Helm, 0, -1 });
+    enqueue(world, { CommandType::Wheel, 0, Station::Helm, 0, -.5f });
+    step(world);
+    CHECK(std::fabs(snapshot(world, false).throttle[0] - .4f) < .0001f);
+    CHECK(std::fabs(snapshot(world, false).rudder - .3f) < .0001f);
+    CHECK(statistics(world).rejectedCommands == 2);
+    for (unsigned stepIndex = 0; stepIndex < 600; ++stepIndex)
+        step(world);
+    CHECK(!snapshot(world, false).travelling);
+    CHECK(!canOperateHelm(world, 0));
+    enqueue(world, { CommandType::Attend, 1, Station::Helm });
+    step(world);
+    CHECK(!canOperateHelm(world, 1));
+    setHelmSkill(world, 1, 2);
+    enqueue(world, { CommandType::Attend, 1, Station::Helm });
+    step(world);
+    CHECK(!canOperateHelm(world, 1));
+    for (unsigned stepIndex = 0; stepIndex < 100; ++stepIndex)
+        step(world);
+    CHECK(canOperateHelm(world, 1));
     CHECK(interactionTimeScale(Difficulty::Beginner, true) == 0);
     CHECK(interactionTimeScale(Difficulty::Intermediate, true) == .25f);
     CHECK(interactionTimeScale(Difficulty::Advanced, true) == 1);
-    resetWorld(w);
-    for (unsigned i = 0; i < 300; ++i)
-        step(w);
-    const auto warm = statistics(w).allocationCount;
-    const auto bytes = statistics(w).liveAllocationBytes;
-    for (unsigned i = 0; i < 36000; ++i)
-        step(w);
-    CHECK(statistics(w).allocationCount == warm);
-    enqueue(w, { CommandType::Throttle, 0, Station::Helm, 0, .7f });
-    enqueue(w, { CommandType::Wheel, 0, Station::Helm, 0, .25f });
-    for (unsigned i = 0; i < 3600; ++i)
-        step(w);
-    CHECK(droppedWavePackets(worldOcean(w)) == 0);
-    CHECK(statistics(w).allocationCount == warm);
-    CHECK(std::fabs(snapshot(w, false).position.y) < 2);
-    CHECK(statistics(w).liveAllocationBytes == bytes);
-    CHECK(statistics(w).physicsErrors == 0);
-    CHECK(std::isfinite(snapshot(w, false).position.y));
-    CHECK(std::fabs(snapshot(w, false).position.y) < 2);
-    for (unsigned i = 0; i < 20; ++i)
+    resetWorld(world);
+    for (unsigned stepIndex = 0; stepIndex < 300; ++stepIndex)
+        step(world);
+    const auto warm = statistics(world).allocationCount;
+    const auto bytes = statistics(world).liveAllocationBytes;
+    for (unsigned stepIndex = 0; stepIndex < 36000; ++stepIndex)
+        step(world);
+    CHECK(statistics(world).allocationCount == warm);
+    enqueue(world, { CommandType::Throttle, 0, Station::Helm, 0, .7f });
+    enqueue(world, { CommandType::Wheel, 0, Station::Helm, 0, .25f });
+    for (unsigned stepIndex = 0; stepIndex < 3600; ++stepIndex)
+        step(world);
+    CHECK(droppedWavePackets(worldOcean(world)) == 0);
+    CHECK(statistics(world).allocationCount == warm);
+    CHECK(std::fabs(snapshot(world, false).position.y) < 2);
+    CHECK(statistics(world).liveAllocationBytes == bytes);
+    CHECK(statistics(world).physicsErrors == 0);
+    CHECK(std::isfinite(snapshot(world, false).position.y));
+    CHECK(std::fabs(snapshot(world, false).position.y) < 2);
+    for (unsigned resetIndex = 0; resetIndex < 20; ++resetIndex)
     {
-        resetWorld(w);
-        step(w);
+        resetWorld(world);
+        step(world);
     }
-    CHECK(statistics(w).allocationCount == warm);
-    for (unsigned i = 0; i < 64; ++i)
-        CHECK(enqueue(w, { CommandType::Brake, 0, Station::Helm, 0, 1 }));
-    CHECK(!enqueue(w, { CommandType::Brake, 0, Station::Helm, 0, 1 }));
-    CHECK(statistics(w).commandOverflow == 1);
-    step(w);
-    destroyWorld(w);
+    CHECK(statistics(world).allocationCount == warm);
+    for (unsigned commandIndex = 0; commandIndex < 64; ++commandIndex)
+        CHECK(enqueue(world, { CommandType::Brake, 0, Station::Helm, 0, 1 }));
+    CHECK(!enqueue(world, { CommandType::Brake, 0, Station::Helm, 0, 1 }));
+    CHECK(statistics(world).commandOverflow == 1);
+    step(world);
+    destroyWorld(world);
 
     auto           boat = monohullLayout(true);
     PropellerState flow = {};
     updatePropeller(boat.propellers[0], flow, 1, 0, FixedStep);
     Vec3 behind = { 0, -.65f, -4.8f };
     CHECK(rudderWash(boat.propellers[0], flow, behind, 0).z == 0);
-    for (unsigned i = 1; i < 240; ++i)
-        updatePropeller(boat.propellers[0], flow, 1, i * FixedStep, FixedStep);
+    for (unsigned stepIndex = 1; stepIndex < 240; ++stepIndex)
+        updatePropeller(boat.propellers[0], flow, 1, stepIndex * FixedStep, FixedStep);
     CHECK(rudderWash(boat.propellers[0], flow, behind, 239 * FixedStep).z < 0);
     CHECK(rudderWash(boat.propellers[0], flow, boat.rudders[0].position, 239 * FixedStep).z == 0);
     auto ahead = behind;
@@ -137,8 +137,8 @@ int main()
     // Propeller walk is independent of rudder angle and works with no rudder wash.
     auto           single = monohullLayout();
     PropellerState moving = {};
-    for (unsigned i = 0; i < 240; ++i)
-        updatePropeller(single.propellers[0], moving, 1, i * FixedStep, FixedStep);
+    for (unsigned stepIndex = 0; stepIndex < 240; ++stepIndex)
+        updatePropeller(single.propellers[0], moving, 1, stepIndex * FixedStep, FixedStep);
     float aheadWalk = propellerWalk(single.propellers[0], moving);
     CHECK(aheadWalk > 0);
     CHECK(rudderForce(single.rudders[0], 0, { 0, 0, -3 }, 1).x == 0);
@@ -147,27 +147,27 @@ int main()
     auto aft = single.propellers[0];
     aft.position.z = -6;
     CHECK(rudderWash(aft, moving, single.rudders[0].position, 4).z == 0);
-    for (unsigned i = 241; i < 800; ++i)
-        updatePropeller(single.propellers[0], moving, -1, i * FixedStep, FixedStep);
+    for (unsigned stepIndex = 241; stepIndex < 800; ++stepIndex)
+        updatePropeller(single.propellers[0], moving, -1, stepIndex * FixedStep, FixedStep);
     CHECK(rudderWash(single.propellers[0], moving, { 0, -.65f, -2 }, 799 * FixedStep).z > 0);
     CHECK(rudderWash(single.propellers[0], moving, single.rudders[0].position, 799 * FixedStep).z == 0);
     auto sideways = single.propellers[0];
     sideways.axis = { 1, 0, 0 };
     PropellerState sidewaysFlow = {};
-    for (unsigned i = 0; i < 240; ++i)
-        updatePropeller(sideways, sidewaysFlow, 1, i * FixedStep, FixedStep);
+    for (unsigned stepIndex = 0; stepIndex < 240; ++stepIndex)
+        updatePropeller(sideways, sidewaysFlow, 1, stepIndex * FixedStep, FixedStep);
     CHECK(rudderWash(sideways, sidewaysFlow, { -1.5f, -.65f, -3.3f }, 239 * FixedStep).x < 0);
     auto* cat = createWorld(true);
-    for (unsigned i = 0; i < 300; ++i)
+    for (unsigned stepIndex = 0; stepIndex < 300; ++stepIndex)
         step(cat);
     CHECK(std::isfinite(snapshot(cat, false).position.y));
     enqueue(cat, { CommandType::Throttle, 0, Station::Helm, 0, .7f });
-    for (unsigned i = 0; i < 180; ++i)
+    for (unsigned stepIndex = 0; stepIndex < 180; ++stepIndex)
         step(cat);
     CHECK(snapshot(cat, false).rotation.y > 0);
     resetWorld(cat);
     enqueue(cat, { CommandType::Throttle, 0, Station::Helm, 1, .7f });
-    for (unsigned i = 0; i < 180; ++i)
+    for (unsigned stepIndex = 0; stepIndex < 180; ++stepIndex)
         step(cat);
     CHECK(snapshot(cat, false).rotation.y < 0);
     destroyWorld(cat);
@@ -177,14 +177,14 @@ int main()
     environment.windSpeed = 0;
     environment.current = { .5f, 0, 0 };
     setEnvironment(drift, environment);
-    for (unsigned i = 0; i < 480; ++i)
+    for (unsigned stepIndex = 0; stepIndex < 480; ++stepIndex)
         step(drift);
     CHECK(snapshot(drift, false).velocity.x > 0);
     environment.current = {};
     environment.windSpeed = 7;
     environment.windDirection = 0;
     setEnvironment(drift, environment);
-    for (unsigned i = 0; i < 480; ++i)
+    for (unsigned stepIndex = 0; stepIndex < 480; ++stepIndex)
         step(drift);
     CHECK(snapshot(drift, false).velocity.x > 0);
     CHECK(snapshot(drift, false).rotation.y > 0);

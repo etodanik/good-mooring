@@ -5,10 +5,10 @@
 #include <cmath>
 namespace mooring
 {
-static SubmergedVolume tetra(JPH::Vec3Arg a, JPH::Vec3Arg b, JPH::Vec3Arg c, JPH::Vec3Arg d)
+static SubmergedVolume tetra(JPH::Vec3Arg vertexA, JPH::Vec3Arg vertexB, JPH::Vec3Arg vertexC, JPH::Vec3Arg vertexD)
 {
-    float volume = std::fabs((b - a).Dot((c - a).Cross(d - a))) / 6;
-    return { volume, fromJolt((a + b + c + d) * .25f) };
+    float volume = std::fabs((vertexB - vertexA).Dot((vertexC - vertexA).Cross(vertexD - vertexA))) / 6;
+    return { volume, fromJolt((vertexA + vertexB + vertexC + vertexD) * .25f) };
 }
 static void accumulate(SubmergedVolume& result, const SubmergedVolume& part)
 {
@@ -20,8 +20,8 @@ SubmergedVolume submergedTetrahedron(const BuoyancyCell& cell, Vec3 normal, floa
 {
     MTRACY_FINE_ZONE("submergedTetrahedron");
     JPH::Vec3 vertices[4];
-    for (unsigned i = 0; i < 4; ++i)
-        vertices[i] = toJolt(cell.vertices[i]);
+    for (unsigned vertexIndex = 0; vertexIndex < 4; ++vertexIndex)
+        vertices[vertexIndex] = toJolt(cell.vertices[vertexIndex]);
     JPH::PolyhedronSubmergedVolumeCalculator::Point scratch[4];
     JPH::PolyhedronSubmergedVolumeCalculator        calculator(JPH::Mat44::sIdentity(), vertices, sizeof(JPH::Vec3), 4,
                                                                JPH::Plane(toJolt(normal), -distance),
@@ -32,11 +32,11 @@ SubmergedVolume submergedTetrahedron(const BuoyancyCell& cell, Vec3 normal, floa
         return { cell.volume, cell.center };
     // Only the face opposite Jolt's submerged reference vertex contributes.
     unsigned face[3], count = 0, reference = unsigned(calculator.GetReferencePointIdx());
-    for (unsigned i = 0; i < 4; ++i)
-        if (i != reference)
-            face[count++] = i;
-    auto a = vertices[face[0]], b = vertices[face[1]], c = vertices[face[2]];
-    if ((b - a).Cross(c - a).Dot(vertices[reference] - a) > 0)
+    for (unsigned vertexIndex = 0; vertexIndex < 4; ++vertexIndex)
+        if (vertexIndex != reference)
+            face[count++] = vertexIndex;
+    auto vertexA = vertices[face[0]], vertexB = vertices[face[1]], vertexC = vertices[face[2]];
+    if ((vertexB - vertexA).Cross(vertexC - vertexA).Dot(vertices[reference] - vertexA) > 0)
         std::swap(face[1], face[2]);
     calculator.AddFace(int(face[0]), int(face[1]), int(face[2]));
     float     volume;
@@ -44,7 +44,7 @@ SubmergedVolume submergedTetrahedron(const BuoyancyCell& cell, Vec3 normal, floa
     calculator.GetResult(volume, center);
     return { volume, fromJolt(center) };
 }
-Vec3 hullVertex(const VesselLayout& v, unsigned hull, unsigned vertex)
+Vec3 hullVertex(const VesselLayout& layout, unsigned hull, unsigned vertex)
 {
     // Symmetric displacement hull with an immersed transom and a fine bow.
     // The same authored sections feed graphics, collision and hydrostatics.
@@ -52,119 +52,123 @@ Vec3 hullVertex(const VesselLayout& v, unsigned hull, unsigned vertex)
     constexpr float xs[HullSectionVertices] = { 0, -.55f, -.94f, -1, 1, .94f, .55f };
     constexpr float ys[HullSectionVertices] = { -1, -.65f, -.10f, 0, 0, -.10f, -.65f };
     unsigned        row = vertex / HullSectionVertices, corner = vertex % HullSectionVertices;
-    float           halfWidth = (v.hullSpacing > 0 ? (v.beam - v.hullSpacing) : v.beam) * .5f;
-    float           x = xs[corner] * widths[row] * halfWidth + (v.hullSpacing > 0 ? (hull ? .5f : -.5f) * v.hullSpacing : 0);
-    float           y = corner == 3 || corner == 4 ? .85f : ys[corner] * v.hullDraft;
-    float           z = (float(row) / (HullSections - 1) - .5f) * v.length;
-    return { x, y, z };
+    float           halfWidth = (layout.hullSpacing > 0 ? (layout.beam - layout.hullSpacing) : layout.beam) * .5f;
+    float lateralPosition = xs[corner] * widths[row] * halfWidth + (layout.hullSpacing > 0 ? (hull ? .5f : -.5f) * layout.hullSpacing : 0);
+    float verticalPosition = corner == 3 || corner == 4 ? .85f : ys[corner] * layout.hullDraft;
+    float longitudinalPosition = (float(row) / (HullSections - 1) - .5f) * layout.length;
+    return { lateralPosition, verticalPosition, longitudinalPosition };
 }
-void hullTriangle(const VesselLayout& v, unsigned hull, unsigned triangle, Vec3 out[3])
+void hullTriangle(const VesselLayout& layout, unsigned hull, unsigned triangle, Vec3 out[3])
 {
     constexpr unsigned sides = (HullSections - 1) * HullSectionVertices * 2;
     if (triangle < sides)
     {
-        unsigned edge = triangle / 2, row = edge / HullSectionVertices, a = edge % HullSectionVertices, b = (a + 1) % HullSectionVertices;
-        out[0] = hullVertex(v, hull, row * HullSectionVertices + a);
-        out[1] = hullVertex(v, hull, (row + 1) * HullSectionVertices + (triangle % 2 ? b : a));
-        out[2] = hullVertex(v, hull, (triangle % 2 ? row : row + 1) * HullSectionVertices + b);
+        unsigned edge = triangle / 2, row = edge / HullSectionVertices, vertexA = edge % HullSectionVertices,
+                 vertexB = (vertexA + 1) % HullSectionVertices;
+        out[0] = hullVertex(layout, hull, row * HullSectionVertices + vertexA);
+        out[1] = hullVertex(layout, hull, (row + 1) * HullSectionVertices + (triangle % 2 ? vertexB : vertexA));
+        out[2] = hullVertex(layout, hull, (triangle % 2 ? row : row + 1) * HullSectionVertices + vertexB);
         // Mirror the diagonal on the opposite side. Twisted section quads
         // otherwise introduce an artificial port/starboard stability bias.
-        if (a >= 4)
+        if (vertexA >= 4)
         {
-            out[0] = hullVertex(v, hull, row * HullSectionVertices + (triangle % 2 ? b : a));
-            out[1] = hullVertex(v, hull, (row + 1) * HullSectionVertices + a);
-            out[2] = hullVertex(v, hull, (triangle % 2 ? row + 1 : row) * HullSectionVertices + b);
+            out[0] = hullVertex(layout, hull, row * HullSectionVertices + (triangle % 2 ? vertexB : vertexA));
+            out[1] = hullVertex(layout, hull, (row + 1) * HullSectionVertices + vertexA);
+            out[2] = hullVertex(layout, hull, (triangle % 2 ? row + 1 : row) * HullSectionVertices + vertexB);
         }
     }
     else
     {
-        unsigned cap = (triangle - sides) / (HullSectionVertices - 2), i = (triangle - sides) % (HullSectionVertices - 2) + 1;
+        unsigned cap = (triangle - sides) / (HullSectionVertices - 2), fanIndex = (triangle - sides) % (HullSectionVertices - 2) + 1;
         unsigned row = cap ? HullSections - 1 : 0;
-        out[0] = hullVertex(v, hull, row * HullSectionVertices);
-        out[1] = hullVertex(v, hull, row * HullSectionVertices + i + (cap ? 1 : 0));
-        out[2] = hullVertex(v, hull, row * HullSectionVertices + i + (cap ? 0 : 1));
+        out[0] = hullVertex(layout, hull, row * HullSectionVertices);
+        out[1] = hullVertex(layout, hull, row * HullSectionVertices + fanIndex + (cap ? 1 : 0));
+        out[2] = hullVertex(layout, hull, row * HullSectionVertices + fanIndex + (cap ? 0 : 1));
     }
 }
-static void makeCells(VesselLayout& v)
+static void makeCells(VesselLayout& layout)
 {
-    v.cellCount = 0;
-    v.hullVolume = 0;
-    for (unsigned hull = 0; hull < (v.hullSpacing > 0 ? 2u : 1u); ++hull)
+    layout.cellCount = 0;
+    layout.hullVolume = 0;
+    for (unsigned hull = 0; hull < (layout.hullSpacing > 0 ? 2u : 1u); ++hull)
     {
-        Vec3 origin = { v.hullSpacing > 0 ? (hull ? .5f : -.5f) * v.hullSpacing : 0, 0, 0 };
-        for (unsigned i = 0; i < HullTriangles; ++i)
+        Vec3 origin = { layout.hullSpacing > 0 ? (hull ? .5f : -.5f) * layout.hullSpacing : 0, 0, 0 };
+        for (unsigned triangleIndex = 0; triangleIndex < HullTriangles; ++triangleIndex)
         {
             Vec3 points[3];
-            hullTriangle(v, hull, i, points);
+            hullTriangle(layout, hull, triangleIndex, points);
             auto volume = tetra(toJolt(origin), toJolt(points[0]), toJolt(points[1]), toJolt(points[2]));
             if (volume.volume < 1e-8f)
                 continue;
-            auto& cell = v.cells[v.cellCount++];
+            auto& cell = layout.cells[layout.cellCount++];
             cell = { { origin, points[0], points[1], points[2] }, volume.center, volume.volume };
-            v.hullVolume += volume.volume;
+            layout.hullVolume += volume.volume;
         }
         // Fin keel volume uses the same box as the Jolt compound collider.
-        float     halfWidth = v.hullSpacing > 0 ? .14f : .10f, h = v.draft - v.hullDraft;
-        auto      center = toJolt(origin) + JPH::Vec3(0, -v.hullDraft - h * .5f, 0);
+        float     halfWidth = layout.hullSpacing > 0 ? .14f : .10f, keelHeight = layout.draft - layout.hullDraft;
+        auto      center = toJolt(origin) + JPH::Vec3(0, -layout.hullDraft - keelHeight * .5f, 0);
         JPH::Vec3 corners[8];
-        for (unsigned i = 0; i < 8; ++i)
-            corners[i] = center + JPH::Vec3((i & 1 ? 1 : -1) * halfWidth, (i & 2 ? 1 : -1) * h * .5f, i & 4 ? 1 : -1);
+        for (unsigned cornerIndex = 0; cornerIndex < 8; ++cornerIndex)
+            corners[cornerIndex] = center + JPH::Vec3((cornerIndex & 1 ? 1 : -1) * halfWidth, (cornerIndex & 2 ? 1 : -1) * keelHeight * .5f,
+                                                      cornerIndex & 4 ? 1 : -1);
         constexpr unsigned faces[6][4] = { { 0, 4, 6, 2 }, { 1, 3, 7, 5 }, { 0, 1, 5, 4 }, { 2, 6, 7, 3 }, { 0, 2, 3, 1 }, { 4, 5, 7, 6 } };
         for (const auto& face : faces)
-            for (unsigned i = 1; i < 3; ++i)
+            for (unsigned faceTriangleIndex = 1; faceTriangleIndex < 3; ++faceTriangleIndex)
             {
-                auto a = corners[face[0]], b = corners[face[i]], c = corners[face[i + 1]];
-                auto volume = tetra(center, a, b, c);
-                v.cells[v.cellCount++] = { { fromJolt(center), fromJolt(a), fromJolt(b), fromJolt(c) }, volume.center, volume.volume };
-                v.hullVolume += volume.volume;
+                auto vertexA = corners[face[0]], vertexB = corners[face[faceTriangleIndex]], vertexC = corners[face[faceTriangleIndex + 1]];
+                auto volume = tetra(center, vertexA, vertexB, vertexC);
+                layout.cells[layout.cellCount++] = { { fromJolt(center), fromJolt(vertexA), fromJolt(vertexB), fromJolt(vertexC) },
+                                                     volume.center,
+                                                     volume.volume };
+                layout.hullVolume += volume.volume;
             }
     }
 }
-void buildHullVolumes(VesselLayout& v)
+void buildHullVolumes(VesselLayout& layout)
 {
     // Solve the hull's immersed depth for the chosen displacement. No force
     // multiplier can hide a mismatch between geometry and displaced volume.
-    float low = .08f, high = v.draft * .95f;
+    float low = .08f, high = layout.draft * .95f;
     for (unsigned iteration = 0; iteration < 24; ++iteration)
     {
-        v.hullDraft = (low + high) * .5f;
-        makeCells(v);
+        layout.hullDraft = (low + high) * .5f;
+        makeCells(layout);
         float volume = 0;
-        for (unsigned i = 0; i < v.cellCount; ++i)
-            volume += submergedTetrahedron(v.cells[i], { 0, 1, 0 }, 0).volume;
-        if (volume * 1025 < v.mass)
-            low = v.hullDraft;
+        for (unsigned cellIndex = 0; cellIndex < layout.cellCount; ++cellIndex)
+            volume += submergedTetrahedron(layout.cells[cellIndex], { 0, 1, 0 }, 0).volume;
+        if (volume * WaterDensity < layout.mass)
+            low = layout.hullDraft;
         else
-            high = v.hullDraft;
+            high = layout.hullDraft;
     }
     // Balance fore-and-aft moments at the authored waterline as well as mass.
     SubmergedVolume submerged = {};
-    for (unsigned i = 0; i < v.cellCount; ++i)
-        accumulate(submerged, submergedTetrahedron(v.cells[i], { 0, 1, 0 }, 0));
-    v.centerOfMass.z = submerged.center.z;
+    for (unsigned cellIndex = 0; cellIndex < layout.cellCount; ++cellIndex)
+        accumulate(submerged, submergedTetrahedron(layout.cells[cellIndex], { 0, 1, 0 }, 0));
+    layout.centerOfMass.z = submerged.center.z;
 }
-HydrostaticState hydrostaticState(const VesselLayout& v, float heel, float height)
+HydrostaticState hydrostaticState(const VesselLayout& layout, float heel, float height)
 {
-    auto            q = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), heel);
-    auto            normal = q.Conjugated() * JPH::Vec3::sAxisY();
+    auto            heelRotation = JPH::Quat::sRotation(JPH::Vec3::sAxisZ(), heel);
+    auto            normal = heelRotation.Conjugated() * JPH::Vec3::sAxisY();
     SubmergedVolume wet = {};
-    for (unsigned i = 0; i < v.cellCount; ++i)
-        accumulate(wet, submergedTetrahedron(v.cells[i], fromJolt(normal), -height));
-    auto arm = q * (toJolt(wet.center) - toJolt(v.centerOfMass));
-    return { wet.volume, fromJolt(q * toJolt(wet.center) + JPH::Vec3(0, height, 0)), -arm.GetX(), height };
+    for (unsigned cellIndex = 0; cellIndex < layout.cellCount; ++cellIndex)
+        accumulate(wet, submergedTetrahedron(layout.cells[cellIndex], fromJolt(normal), -height));
+    auto arm = heelRotation * (toJolt(wet.center) - toJolt(layout.centerOfMass));
+    return { wet.volume, fromJolt(heelRotation * toJolt(wet.center) + JPH::Vec3(0, height, 0)), -arm.GetX(), height };
 }
-HydrostaticState equilibriumAtHeel(const VesselLayout& v, float heel)
+HydrostaticState equilibriumAtHeel(const VesselLayout& layout, float heel)
 {
-    float low = -v.beam - v.draft, high = v.beam + v.draft;
-    for (unsigned i = 0; i < 30; ++i)
+    float low = -layout.beam - layout.draft, high = layout.beam + layout.draft;
+    for (unsigned iteration = 0; iteration < 30; ++iteration)
     {
         float height = (low + high) * .5f;
-        auto  state = hydrostaticState(v, heel, height);
-        if (state.volume * 1025 > v.mass)
+        auto  state = hydrostaticState(layout, heel, height);
+        if (state.volume * WaterDensity > layout.mass)
             low = height;
         else
             high = height;
     }
-    return hydrostaticState(v, heel, (low + high) * .5f);
+    return hydrostaticState(layout, heel, (low + high) * .5f);
 }
 } // namespace mooring

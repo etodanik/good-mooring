@@ -3,11 +3,10 @@
 
 namespace mooring
 {
-constexpr unsigned MaxVessels = 16;
 constexpr unsigned MaxCrew = 5;
-constexpr unsigned MaxFenders = 8;
-constexpr unsigned MaxLines = 12;
 constexpr float    FixedStep = 1.0f / 60.0f;
+constexpr float    Gravity = 9.81f;        // m/s^2
+constexpr float    WaterDensity = 1025.0f; // kg/m^3
 
 struct Vec3
 {
@@ -62,7 +61,6 @@ struct Helm
 struct PhysicsBody
 {
     uint32_t handle;
-    uint8_t  layout;
 };
 struct Snapshot
 {

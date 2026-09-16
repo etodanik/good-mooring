@@ -793,8 +793,41 @@ static bool              gAppKitCursorValid;
 static const TFInputEnum gAppKitShortcutKeys[] = { K_F1, K_F2, K_F3, K_F4, K_F5, K_F10 };
 static const unsigned    gAppKitShortcutKeyCodes[] = { kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F10 };
 static bool              gAppKitShortcutDown[6], gAppKitShortcutPresses[6];
-static bool              gAppKitControlDown, gAppKitShortcutControl;
-void                     platformMousePosition(float x, float y)
+static bool              gAppKitControlDown, gAppKitPressedControl;
+static bool              gAppKitShiftDown, gAppKitPressedShift;
+// AppKit supplies text-editing keys even when GameController has no keyboard device.
+static const struct
+{
+    unsigned    code;
+    TFInputEnum input;
+} gAppKitKeys[] = {
+    { kVK_ANSI_A, K_A },
+    { kVK_ANSI_S, K_S },
+    { kVK_ANSI_D, K_D },
+    { kVK_ANSI_W, K_W },
+    { kVK_ANSI_C, K_C },
+    { kVK_ANSI_X, K_X },
+    { kVK_ANSI_V, K_V },
+    { kVK_ANSI_Z, K_Z },
+    { kVK_ANSI_Y, K_Y },
+    { kVK_Delete, K_BACKSPACE },
+    { kVK_ForwardDelete, K_DEL },
+    { kVK_Return, K_ENTER },
+    { kVK_Tab, K_TAB },
+    { kVK_LeftArrow, K_LEFTARROW },
+    { kVK_RightArrow, K_RIGHTARROW },
+    { kVK_UpArrow, K_UPARROW },
+    { kVK_DownArrow, K_DOWNARROW },
+    { kVK_Home, K_HOME },
+    { kVK_End, K_END },
+    { kVK_PageUp, K_PGUP },
+    { kVK_PageDown, K_PGDN },
+    { kVK_Help, K_INS },
+    { kVK_F11, K_F11 },
+    { kVK_F12, K_F12 },
+};
+static bool gAppKitKeyDown[TF_ARRAY_COUNT(gAppKitKeys)], gAppKitKeyPresses[TF_ARRAY_COUNT(gAppKitKeys)];
+void        platformMousePosition(float x, float y)
 {
     gAppKitCursor = NSMakePoint(x, y);
     gAppKitCursorValid = true;
@@ -808,7 +841,11 @@ void platformMouseButton(unsigned button, bool down)
     gAppKitPresses[button] |= down;
 }
 void platformMouseScroll(float delta) { gAppKitScroll += delta; }
-void platformKeyModifiers(bool control) { gAppKitControlDown = control; }
+void platformKeyModifiers(NSEventModifierFlags modifiers)
+{
+    gAppKitControlDown = (modifiers & NSEventModifierFlagControl) != 0;
+    gAppKitShiftDown = (modifiers & NSEventModifierFlagShift) != 0;
+}
 bool platformIsShortcutKey(unsigned code)
 {
     for (unsigned shortcut : gAppKitShortcutKeyCodes)
@@ -816,15 +853,24 @@ bool platformIsShortcutKey(unsigned code)
             return true;
     return false;
 }
-void platformResetShortcutKeys()
+void platformResetKeyboard()
 {
     for (unsigned index = 0; index < TF_ARRAY_COUNT(gAppKitShortcutKeys); ++index)
     {
         gAppKitShortcutDown[index] = gAppKitShortcutPresses[index] = false;
         gInputValues[gAppKitShortcutKeys[index]] = 0;
     }
-    gAppKitControlDown = gAppKitShortcutControl = false;
+    gAppKitControlDown = gAppKitPressedControl = false;
     gInputValues[K_LCTRL] = gInputValues[K_RCTRL] = 0;
+    gAppKitShiftDown = gAppKitPressedShift = false;
+    gInputValues[K_LSHIFT] = gInputValues[K_RSHIFT] = 0;
+    for (unsigned index = 0; index < TF_ARRAY_COUNT(gAppKitKeys); ++index)
+    {
+        gAppKitKeyDown[index] = gAppKitKeyPresses[index] = false;
+        gInputValues[gAppKitKeys[index].input] = 0;
+    }
+    memset(gInputRepeat, 0, sizeof(gInputRepeat));
+    gCharacterBufferCount = 0;
 }
 void platformKeyButton(unsigned code, bool down)
 {
@@ -834,28 +880,21 @@ void platformKeyButton(unsigned code, bool down)
         {
             gAppKitShortcutDown[index] = down;
             gAppKitShortcutPresses[index] |= down;
-            gAppKitShortcutControl |= down && gAppKitControlDown;
+            gAppKitPressedControl |= down && gAppKitControlDown;
             return;
         }
-    TFInputEnum key;
-    switch (code)
-    {
-    case kVK_ANSI_A:
-        key = K_A;
-        break;
-    case kVK_ANSI_S:
-        key = K_S;
-        break;
-    case kVK_ANSI_D:
-        key = K_D;
-        break;
-    case kVK_ANSI_W:
-        key = K_W;
-        break;
-    default:
-        return;
-    }
-    gInputValues[key] = down;
+    for (unsigned index = 0; index < TF_ARRAY_COUNT(gAppKitKeys); ++index)
+        if (code == gAppKitKeys[index].code)
+        {
+            gAppKitKeyDown[index] = down;
+            gAppKitKeyPresses[index] |= down;
+            gAppKitPressedControl |= down && gAppKitControlDown;
+            gAppKitPressedShift |= down && gAppKitShiftDown;
+            // Preserve the initial press and OS key-repeat until the frame consumes them.
+            // Key-up can arrive in the same frame and must not erase the edit event.
+            gInputRepeat[gAppKitKeys[index].input] |= down;
+            return;
+        }
 }
 #endif
 
@@ -882,9 +921,17 @@ void platformUpdateInput(uint32_t width, uint32_t height, float dt)
         gInputValues[gAppKitShortcutKeys[index]] = gAppKitShortcutDown[index] || gAppKitShortcutPresses[index];
         gAppKitShortcutPresses[index] = false;
     }
-    gInputValues[K_LCTRL] = gAppKitControlDown || gAppKitShortcutControl;
+    gInputValues[K_LCTRL] = gAppKitControlDown || gAppKitPressedControl;
     gInputValues[K_RCTRL] = 0;
-    gAppKitShortcutControl = false;
+    gAppKitPressedControl = false;
+    gInputValues[K_LSHIFT] = gAppKitShiftDown || gAppKitPressedShift;
+    gInputValues[K_RSHIFT] = 0;
+    gAppKitPressedShift = false;
+    for (unsigned index = 0; index < TF_ARRAY_COUNT(gAppKitKeys); ++index)
+    {
+        gInputValues[gAppKitKeys[index].input] = gAppKitKeyDown[index] || gAppKitKeyPresses[index];
+        gAppKitKeyPresses[index] = false;
+    }
     // Events and polling share the same window-to-view conversion, including fullscreen.
     const NSPoint windowCursor = gAppKitCursorValid ? gAppKitCursor : [pMainView.window mouseLocationOutsideOfEventStream];
     const NSPoint localCursor = [pMainView convertPoint:windowCursor fromView:nil];
@@ -972,6 +1019,7 @@ void platformUpdateInput(uint32_t width, uint32_t height, float dt)
 void platformResetInputState()
 {
     memcpy(gLastInputValues + K_FIRST - 1, gInputValues + K_FIRST - 1, K_COUNT * sizeof(gInputValues[0]));
+    memset(gInputRepeat, 0, sizeof(gInputRepeat));
     gCharacterBufferCount = 0;
 }
 

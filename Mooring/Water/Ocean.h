@@ -66,13 +66,13 @@ struct OceanMetrics
     uint64_t updates;
 };
 struct Ocean;
-Ocean*              createOcean(const SeaState& settings);
-void                destroyOcean(Ocean* ocean);
-void                configureOcean(Ocean* ocean, const SeaState& settings);
-void                updateOcean(Ocean* ocean, double time);
-WaterSample         sampleOcean(const Ocean* ocean, float x, float z, float depthBelowSurface = 0, uint32_t excludeBody = UINT32_MAX);
-WaterSample         sampleOceanBand(const Ocean* ocean, unsigned band, float x, float z);
-const SeaState&     seaState(const Ocean* ocean);
+Ocean*          createOcean(const SeaState& settings);
+void            destroyOcean(Ocean* ocean);
+void            configureOcean(Ocean* ocean, const SeaState& settings);
+void            updateOcean(Ocean* ocean, double time);
+WaterSample     sampleOcean(const Ocean* ocean, float worldX, float worldZ, float depthBelowSurface = 0, uint32_t excludeBody = UINT32_MAX);
+WaterSample     sampleOceanBand(const Ocean* ocean, unsigned band, float worldX, float worldZ);
+const SeaState& seaState(const Ocean* ocean);
 const SpectrumMode* oceanSpectrum(const Ocean* ocean);
 const OceanMetrics& oceanMetrics(const Ocean* ocean);
 uint32_t            oceanRevision(const Ocean* ocean);
@@ -80,7 +80,8 @@ bool         emitWavePacket(Ocean* ocean, Vec3 position, Vec3 direction, float w
                             uint32_t sourceBody = UINT32_MAX);
 void         advanceWavePackets(Ocean* ocean, float dt, Vec3 patchCenter, bool dockReflection = true);
 void         clearWavePackets(Ocean* ocean);
-PacketSample sampleWavePackets(const Ocean* ocean, float x, float z, float depthBelowSurface = 0, uint32_t excludeBody = UINT32_MAX);
+PacketSample sampleWavePackets(const Ocean* ocean, float worldX, float worldZ, float depthBelowSurface = 0,
+                               uint32_t excludeBody = UINT32_MAX);
 const WavePacket* oceanPackets(const Ocean* ocean);
 void              setHullWake(Ocean* ocean, unsigned index, const HullWake& wake);
 const HullWake*   oceanHullWakes(const Ocean* ocean);

@@ -246,10 +246,11 @@ class MooringSimulator final: public IApp
         {
             float minimum = 0, maximum = 0;
             auto* ocean = mooring::worldOcean(gGame.world);
-            for (int z = -24; z <= 24; ++z)
-                for (int x = -16; x <= 16; ++x)
+            for (int sampleZ = -24; sampleZ <= 24; ++sampleZ)
+                for (int sampleX = -16; sampleX <= 16; ++sampleX)
                 {
-                    float height = mooring::sampleWavePackets(ocean, state.position.x + x * .5f, state.position.z + z * .5f).height;
+                    float height =
+                        mooring::sampleWavePackets(ocean, state.position.x + sampleX * .5f, state.position.z + sampleZ * .5f).height;
                     minimum = std::min(minimum, height);
                     maximum = std::max(maximum, height);
                 }
@@ -283,8 +284,8 @@ class MooringSimulator final: public IApp
             }
             if (offset >= 12 && offset < 24 && offset % 3 == 0)
             {
-                static const int views[] = { 0, 8, 11, 26 };
-                int              view = views[(offset - 12) / 3];
+                static const int resizeViews[] = { 0, 8, 11, 26 };
+                int              view = resizeViews[(offset - 12) / 3];
                 gGame.seaLab.look.debugView = view;
                 char name[100];
                 snprintf(name, sizeof name, "resize-%d-%dx%d-%02d", stage, mSettings.mWidth, mSettings.mHeight, view);
@@ -379,69 +380,69 @@ public:
         if (!validateResources())
             return false;
         int requestedScene = -1;
-        for (int i = 1; i < argc; i++)
+        for (int argumentIndex = 1; argumentIndex < argc; argumentIndex++)
         {
-            if (strcmp(argv[i], "--shader-lab") == 0)
+            if (strcmp(argv[argumentIndex], "--shader-lab") == 0)
                 openShaderLab = true;
-            if (strcmp(argv[i], "--shader-lab-qa") == 0)
+            if (strcmp(argv[argumentIndex], "--shader-lab-qa") == 0)
                 qaShaderLab = openShaderLab = true;
-            if (strcmp(argv[i], "--water-qa") == 0)
+            if (strcmp(argv[argumentIndex], "--water-qa") == 0)
                 qaScenario = 0;
-            if (strcmp(argv[i], "--water-qa-ultra") == 0)
+            if (strcmp(argv[argumentIndex], "--water-qa-ultra") == 0)
             {
                 qaScenario = 0;
                 qaUltra = true;
             }
-            if (strcmp(argv[i], "--water-qa-reload") == 0)
+            if (strcmp(argv[argumentIndex], "--water-qa-reload") == 0)
             {
                 qaScenario = 11;
                 qaReload = true;
             }
-            if (strcmp(argv[i], "--water-qa-motion") == 0)
+            if (strcmp(argv[argumentIndex], "--water-qa-motion") == 0)
                 qaMotion = true;
-            if (strcmp(argv[i], "--water-qa-still") == 0)
+            if (strcmp(argv[argumentIndex], "--water-qa-still") == 0)
                 qaStill = true;
-            if (strcmp(argv[i], "--water-qa-resize") == 0)
+            if (strcmp(argv[argumentIndex], "--water-qa-resize") == 0)
             {
                 qaResize = true;
                 qaScenario = 4;
             }
-            sscanf(argv[i], "--water-qa-sun=%f", &qaSun);
-            sscanf(argv[i], "--water-qa-rudder=%f", &qaRudder);
-            sscanf(argv[i], "--water-qa-sun-height=%f", &qaSunHeight);
-            if (strcmp(argv[i], "--water-qa-low") == 0)
+            sscanf(argv[argumentIndex], "--water-qa-sun=%f", &qaSun);
+            sscanf(argv[argumentIndex], "--water-qa-rudder=%f", &qaRudder);
+            sscanf(argv[argumentIndex], "--water-qa-sun-height=%f", &qaSunHeight);
+            if (strcmp(argv[argumentIndex], "--water-qa-low") == 0)
                 qaLow = true;
-            if (strcmp(argv[i], "--water-qa-waterline") == 0)
+            if (strcmp(argv[argumentIndex], "--water-qa-waterline") == 0)
                 qaWaterline = true;
-            if (strcmp(argv[i], "--water-profile") == 0)
+            if (strcmp(argv[argumentIndex], "--water-profile") == 0)
                 qaProfile = true;
 #ifdef TRACY_ENABLE
-            if (strncmp(argv[i], "--tracy-images=", 15) == 0)
-                mooringTracyMetalImages(unsigned(std::max(0, atoi(argv[i] + 15))));
-            if (strcmp(argv[i], "--tracy-wait") == 0)
+            if (strncmp(argv[argumentIndex], "--tracy-images=", 15) == 0)
+                mooringTracyMetalImages(unsigned(std::max(0, atoi(argv[argumentIndex] + 15))));
+            if (strcmp(argv[argumentIndex], "--tracy-wait") == 0)
             {
                 LOGF(eINFO, "Waiting up to 30 seconds for a Tracy capture on localhost:8086");
                 for (unsigned wait = 0; wait < 3000 && !TracyCIsConnected; ++wait)
                     threadSleep(10);
             }
 #endif
-            if (strcmp(argv[i], "--benchmark-unthrottled") == 0)
+            if (strcmp(argv[argumentIndex], "--benchmark-unthrottled") == 0)
                 mSettings.mVSyncEnabled = false;
             int benchmark = 0;
-            if (sscanf(argv[i], "--water-benchmark=%d", &benchmark) == 1 && benchmark > 0)
+            if (sscanf(argv[argumentIndex], "--water-benchmark=%d", &benchmark) == 1 && benchmark > 0)
             {
                 qaBenchmarkFrames = std::clamp(benchmark, 300, 18000);
                 if (qaScenario < 0)
                     qaScenario = 2;
             }
             int scene = 0;
-            if (sscanf(argv[i], "--water-qa-scene=%d", &scene) == 1 && scene >= 0 && scene < 11)
+            if (sscanf(argv[argumentIndex], "--water-qa-scene=%d", &scene) == 1 && scene >= 0 && scene < 11)
                 requestedScene = scene;
             int view = 0;
-            if (sscanf(argv[i], "--water-qa-inspect=%d", &view) == 1 && view >= 0 && view < 45)
+            if (sscanf(argv[argumentIndex], "--water-qa-inspect=%d", &view) == 1 && view >= 0 && view < 45)
                 qaInspect = view;
             int seconds = 0;
-            if (sscanf(argv[i], "--water-qa-seconds=%d", &seconds) == 1 && seconds > 0 && seconds <= 60)
+            if (sscanf(argv[argumentIndex], "--water-qa-seconds=%d", &seconds) == 1 && seconds > 0 && seconds <= 60)
                 qaMotionFrames = seconds * 30;
         }
         mooringTracyAppInfo(GetName());
@@ -500,8 +501,8 @@ public:
         if (qaProfile)
         {
             const char* names[] = { "FFT", "Effects", "Sky", "Geometry", "Surface", "Post" };
-            for (unsigned i = 0; i < mooring::WaterPassCount; ++i)
-                waterProfile.passes[i] = initGpuProfiler(gRenderer, gQueue, names[i]);
+            for (unsigned passIndex = 0; passIndex < mooring::WaterPassCount; ++passIndex)
+                waterProfile.passes[passIndex] = initGpuProfiler(gRenderer, gQueue, names[passIndex]);
         }
         gGame.world = mooring::createWorld();
         mooring::SeaState environment;

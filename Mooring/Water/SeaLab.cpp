@@ -1,13 +1,12 @@
 #include "SeaLab.h"
 #include "../Simulation/Hydrodynamics.h"
 #include "Common/Application/Interfaces/IProfiler.h"
-#include <cctype>
 #include <cstdio>
 #include <cstring>
 namespace mooring
 {
 using namespace toolui;
-void setSeaPreset(SeaLab& lab, World* world, SeaPreset p)
+void setSeaPreset(SeaLab& lab, World* world, SeaPreset preset)
 {
     MTRACY_ZONE("setSeaPreset");
     // Start from a complete state: Calm must not inherit Storm's swell period.
@@ -15,7 +14,7 @@ void setSeaPreset(SeaLab& lab, World* world, SeaPreset p)
     sea.depth = 30;
     lab.look.overcast = .12f;
     lab.look.rain = 0;
-    switch (p)
+    switch (preset)
     {
     case SeaPreset::Glass:
         sea.windSpeed = .2f;
@@ -210,19 +209,6 @@ static void drawQuality(SeaLab& lab)
     uiLayoutAutoTextRows(1);
     uiCheckbox("Edge antialiasing", &lab.look.antialias);
 }
-static bool matches(const char* name, const char* query)
-{
-    for (; *name; ++name)
-    {
-        const char* candidate = name;
-        const char* search = query;
-        while (*candidate && *search && std::tolower((unsigned char)*candidate) == std::tolower((unsigned char)*search))
-            ++candidate, ++search;
-        if (!*search)
-            return true;
-    }
-    return !*query;
-}
 static void drawEffects(SeaLab& lab, Camera& camera)
 {
     const char* views[] = { "Beauty",
@@ -277,9 +263,9 @@ static void drawEffects(SeaLab& lab, Camera& camera)
         wrapped("A Shader Lab scene probe is active. Select an effect to replace it.", Warning);
     else if (lab.look.debugView >= 0 && unsigned(lab.look.debugView) < TF_ARRAY_COUNT(views))
         wrapped(views[lab.look.debugView], Heading);
-    uiLayoutAutoTextRows(1);
+    uiLayoutAutoTextboxRows(1);
     bstring query = bfromarr(lab.effectSearch);
-    uiTextbox("Search effects", &query, TF_WIDGET_EDIT_FILTER_ASCII);
+    uiTextbox("Search effects", &query, TF_WIDGET_EDIT_FILTER_ASCII, false);
     float dpi[2];
     getMonitorDpiScale(getActiveMonitorIdx(), dpi);
     uiLayoutDynamicRows(170 * dpi[1], 1);
@@ -288,7 +274,7 @@ static void drawEffects(SeaLab& lab, Camera& camera)
         uiLayoutAutoTextRows(1);
         bool found = false;
         for (unsigned index = 0; index < TF_ARRAY_COUNT(views); ++index)
-            if (matches(views[index], lab.effectSearch))
+            if (containsIgnoringCase(views[index], lab.effectSearch))
             {
                 found = true;
                 if (button(views[index], lab.look.debugView == int(index), true, views[index]))

@@ -23,11 +23,11 @@ bool runPlatformProbe(TFRenderer* renderer, TFQueue* queue)
     TFTextureUpdateDesc update = { texture, 0, 1, 0, 1, TF_RESOURCE_STATE_SHADER_RESOURCE };
     beginUpdateResource(&update);
     auto subresource = update.getSubresourceUpdateDesc(0, 0);
-    for (unsigned y = 0; y < 8; ++y)
-        for (unsigned x = 0; x < 8; ++x)
+    for (unsigned row = 0; row < 8; ++row)
+        for (unsigned column = 0; column < 8; ++column)
         {
-            uint8_t* texel = subresource.pMappedData + y * subresource.mDstRowStride + x * 4;
-            texel[0] = 1 + x + y * 8;
+            uint8_t* texel = subresource.pMappedData + row * subresource.mDstRowStride + column * 4;
+            texel[0] = 1 + column + row * 8;
             texel[1] = texel[2] = 0;
             texel[3] = 255;
         }
@@ -93,10 +93,10 @@ bool runPlatformProbe(TFRenderer* renderer, TFQueue* queue)
 
     bool        valid = true;
     const auto* values = static_cast<const uint32_t*>(results->pCpuMappedAddress);
-    for (unsigned i = 0; i < 64; ++i)
-        if (values[i] != 1 + i * 8)
+    for (unsigned texelIndex = 0; texelIndex < 64; ++texelIndex)
+        if (values[texelIndex] != 1 + texelIndex * 8)
         {
-            LOGF(eERROR, "Platform probe: texel %u expected %u, got %u", i, 1 + i * 8, values[i]);
+            LOGF(eERROR, "Platform probe: texel %u expected %u, got %u", texelIndex, 1 + texelIndex * 8, values[texelIndex]);
             valid = false;
             break;
         }

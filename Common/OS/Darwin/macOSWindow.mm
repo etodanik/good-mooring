@@ -255,8 +255,8 @@ static NSRect getCenteredWindowRect(TFWindowDesc* winDesc);
 
 - (void)windowDidBecomeMain:(NSNotification*)notification
 {
-    extern void platformKeyModifiers(bool);
-    platformKeyModifiers((NSEvent.modifierFlags & NSEventModifierFlagControl) != 0);
+    extern void platformKeyModifiers(NSEventModifierFlags);
+    platformKeyModifiers(NSEvent.modifierFlags);
     [self.delegate didFocusChange:true];
     if (notification && sCustomProc)
     {
@@ -266,8 +266,8 @@ static NSRect getCenteredWindowRect(TFWindowDesc* winDesc);
 
 - (void)windowDidResignMain:(NSNotification*)notification
 {
-    extern void platformResetShortcutKeys();
-    platformResetShortcutKeys();
+    extern void platformResetKeyboard();
+    platformResetKeyboard();
     [self.delegate didFocusChange:false];
     if (notification && sCustomProc)
     {
@@ -543,8 +543,8 @@ static NSRect getCenteredWindowRect(TFWindowDesc* winDesc);
 
 - (void)keyDown:(NSEvent*)nsEvent
 {
-    extern void platformKeyModifiers(bool);
-    platformKeyModifiers((nsEvent.modifierFlags & NSEventModifierFlagControl) != 0);
+    extern void platformKeyModifiers(NSEventModifierFlags);
+    platformKeyModifiers(nsEvent.modifierFlags);
     extern void platformKeyButton(unsigned, bool);
     platformKeyButton(nsEvent.keyCode, true);
     extern void platformKeyChar(char32_t c);
@@ -552,12 +552,12 @@ static NSRect getCenteredWindowRect(TFWindowDesc* winDesc);
     // we won't have any input in characters string but it will be in charactersIgnoringModifiers
     // It will still have correct Case if shift is pressed.
     NSString*   characters = nsEvent.charactersIgnoringModifiers;
-    for (uint32_t c = 0; c < [characters length]; ++c)
+    for (NSUInteger index = 0; index < [characters length]; ++index)
     {
-        if ([characters characterAtIndex:c])
-        {
-            platformKeyChar([characters characterAtIndex:c]);
-        }
+        const unichar character = [characters characterAtIndex:index];
+        // Navigation keys have private-use characters; they are key events, not text.
+        if (character && !(character >= NSUpArrowFunctionKey && character <= NSModeSwitchFunctionKey))
+            platformKeyChar(character);
     }
 }
 
@@ -569,8 +569,8 @@ static NSRect getCenteredWindowRect(TFWindowDesc* winDesc);
 
 - (void)flagsChanged:(NSEvent*)event
 {
-    extern void platformKeyModifiers(bool);
-    platformKeyModifiers((event.modifierFlags & NSEventModifierFlagControl) != 0);
+    extern void platformKeyModifiers(NSEventModifierFlags);
+    platformKeyModifiers(event.modifierFlags);
 }
 
 // Helps with performance

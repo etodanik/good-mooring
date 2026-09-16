@@ -70,6 +70,12 @@ inline bool beginWindow(const char* title, bool& open, WindowState& state, unsig
 }
 
 inline void label(const char* text) { uiLabel(text, TF_ALIGN_LEFT); }
+inline bool containsIgnoringCase(const char* text, const char* query)
+{
+    const bstring content = bconstfromcstr(text);
+    const bstring search = bconstfromcstr(query);
+    return binstrcaseless(&content, 0, &search) >= 0;
+}
 inline void heading(const char* text)
 {
     uiLayoutAutoTextRows(1);

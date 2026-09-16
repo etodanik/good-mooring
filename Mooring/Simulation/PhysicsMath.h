@@ -5,7 +5,7 @@
 #include <Jolt/Math/Quat.h>
 namespace mooring
 {
-inline JPH::Vec3 toJolt(Vec3 v) { return { v.x, v.y, v.z }; }
-inline Vec3      fromJolt(JPH::Vec3Arg v) { return { v.GetX(), v.GetY(), v.GetZ() }; }
-inline JPH::Quat toJolt(Rotation q) { return { q.x, q.y, q.z, q.w }; }
+inline JPH::Vec3 toJolt(Vec3 value) { return { value.x, value.y, value.z }; }
+inline Vec3      fromJolt(JPH::Vec3Arg value) { return { value.GetX(), value.GetY(), value.GetZ() }; }
+inline JPH::Quat toJolt(Rotation rotation) { return { rotation.x, rotation.y, rotation.z, rotation.w }; }
 } // namespace mooring
